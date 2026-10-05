@@ -1,0 +1,14 @@
+{
+  "name": "edrys-module-tests",
+  "private": true,
+  "description": "End-to-end tests for Edrys modules, run inside a real edrys-Lite",
+  "scripts": {
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.53.0",
+    "@types/node": "^24.0.0"
+  }
+}
