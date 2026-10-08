@@ -58,14 +58,23 @@ export async function serveModules(context: BrowserContext) {
   })
 }
 
-/** The session's iframe of module `name`. Re-resolved each call: frames die on reload and room change. */
-export async function moduleFrame(s: Session, name: string, timeout = 30_000): Promise<Frame> {
+/**
+ * The session's iframe of module `name`. Re-resolved each call: frames die on reload and room change.
+ *
+ * Modules with `<meta name="fetch" content="true">` or a YAML entry point are inlined by edrys-Lite as a
+ * `data:` URL, so their frame URL does not start with the module URL. For those, pass `inline`: text that
+ * occurs in the module's HTML (e.g. a string from its script), which identifies the `data:` frame.
+ */
+export async function moduleFrame(s: Session, name: string, timeout = 30_000, inline?: string): Promise<Frame> {
   const prefix = moduleUrl(name)
+  // edrys-Lite encodes the inlined HTML with escape()
+  const matches = (url: string) =>
+    url.startsWith(prefix) || (!!inline && url.startsWith('data:') && unescape(url).includes(inline))
   let frame: Frame | undefined
   await expect
     .poll(
       () => {
-        frame = s.page.frames().find((f) => f.url().startsWith(prefix))
+        frame = s.page.frames().find((f) => matches(f.url()))
         return !!frame
       },
       { timeout, message: `iframe of ${name} in ${s.page.url()}` }

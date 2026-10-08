@@ -83,9 +83,16 @@ export async function openStation(teacher: Session, classUrl: string): Promise<S
   return { context: teacher.context, page }
 }
 
-/** The station's room name ("Station <name>"). */
-export function stationRoom(station: Session): Promise<string> {
-  return inPeer<string>(station.page, `return p.user().get('room')`)
+/** The station's room name ("Station <name>"), once its presence is published. */
+export async function stationRoom(station: Session): Promise<string> {
+  // Peer.user() returns a plain presence object; older edrys-Lite returned a Y.Map.
+  const read = () =>
+    inPeer<string | null>(
+      station.page,
+      `const u = p.user(); return u ? (typeof u.get === 'function' ? u.get('room') : u.room) || null : null`
+    )
+  await expect.poll(read, { timeout: 30_000 }).toBeTruthy()
+  return (await read())!
 }
 
 // ---------------------------------------------------------------------------

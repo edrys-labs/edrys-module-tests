@@ -107,7 +107,9 @@ how Settings saves a class, update it there.
 
    For a module shown in the lobby, skip the station and the room.
 3. Get the module's iframe with `moduleFrame(session, 'module-x')`, and wait for something the module renders
-   after `Edrys.onReady` before you interact with it.
+   after `Edrys.onReady` before you interact with it. Modules with `<meta name="fetch" content="true">` or a YAML
+   entry point run from a `data:` URL; pass text from their HTML as the 4th argument
+   (`moduleFrame(session, 'module-x', 30_000, 'some unique string')`) to find them.
 4. Close the browsers in `afterEach` with `closeSessions(teacher, student)`. The station shares the teacher's
    browser.
 
