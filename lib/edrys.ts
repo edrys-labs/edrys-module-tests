@@ -116,6 +116,22 @@ export async function enterRoom(s: Session, room: string) {
   await entry.getByRole('button').first().click({ timeout: 45_000 })
 }
 
+/**
+ * Close the class's side menu (rooms and users). It is a temporary drawer
+ * that overlays the left part of the modules, so close it before clicking
+ * there or taking screenshots of a module.
+ */
+export async function closeSideMenu(s: Session) {
+  const drawer = s.page.locator('.v-navigation-drawer--temporary').first()
+  if (await drawer.evaluate((d) => d.classList.contains('v-navigation-drawer--active'))) {
+    await s.page.locator('.v-app-bar-nav-icon').click()
+  }
+  // wait for the slide-out to finish, not just the class change
+  await expect(drawer).not.toBeInViewport()
+  // and for its overlay to fade out: until then it takes the clicks meant for the modules
+  await expect(s.page.locator('.v-navigation-drawer__scrim')).toHaveCount(0)
+}
+
 export async function closeSessions(...sessions: (Session | undefined)[]) {
   for (const s of sessions) {
     if (s) await s.context.close().catch(() => {})

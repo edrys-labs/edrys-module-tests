@@ -110,6 +110,8 @@ how Settings saves a class, update it there.
    after `Edrys.onReady` before you interact with it. Modules with `<meta name="fetch" content="true">` or a YAML
    entry point run from a `data:` URL; pass text from their HTML as the 4th argument
    (`moduleFrame(session, 'module-x', 30_000, 'some unique string')`) to find them.
+   The class's side menu (rooms and users) is a drawer that overlays the left part of the modules; call
+   `closeSideMenu(session)` before clicking there or taking screenshots.
 4. Close the browsers in `afterEach` with `closeSessions(teacher, student)`. The station shares the teacher's
    browser.
 
