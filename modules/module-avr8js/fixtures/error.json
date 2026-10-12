@@ -1,0 +1,1 @@
+{"stdout":"\n","stderr":"/sketch/sketch.ino: In function 'void setup()':\n/sketch/sketch.ino:2:16: error: 'undefinedFunction' was not declared in this scope\n void setup() { undefinedFunction(); }\n                ^~~~~~~~~~~~~~~~~\n\nError during build: exit status 1\n","hex":"","eep":""}

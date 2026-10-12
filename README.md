@@ -58,6 +58,7 @@ lib/
   edrys.ts         drives edrys-Lite: create a class, open the station, join, enter a room, set modules
   modules.ts       serves local modules, finds a module's iframe
   fake-serial.ts   a fake Web Serial device for module iframes
+  fake-hexi.ts     a fake of Wokwi's Arduino compile server (hexi.wokwi.com)
 modules/
   <module-name>/   the tests of one module
 ```
@@ -81,6 +82,19 @@ modules/
   await serial(frame).fail()             // recoverable read error (e.g. wrong baud)
   await serial(frame).unplug()           // device lost
   await serial(frame).cancelNextRequest() // the user cancels the port picker
+  ```
+
+- **Fake compile server.** `installFakeHexi(context)` answers `https://hexi.wokwi.com/**` (used by module-avr8js
+  to compile sketches) from recorded responses, so no network is needed. Record a real response once with curl,
+  keep it as a fixture, and register it for a marker comment in the sketch:
+
+  ```ts
+  const hexi = await installFakeHexi(context)
+  hexi.respond('// e2e:blink', blinkResponse)  // { stdout, stderr, hex } for sketches containing the marker
+  hexi.offline()                              // requests fail like a network error
+  hexi.delay(1500)                            // answers arrive later (overlapping compiles)
+  hexi.requests                               // the sketches the module sent
+  hexi.files                                  // the extra files sent with each sketch (libraries.txt, ...)
   ```
 
 `lib/edrys.ts` reaches into the app's Vue tree in a few places (finding the `Peer`, saving the class). It was
