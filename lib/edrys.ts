@@ -110,10 +110,14 @@ export async function joinClass(browser: Browser, classUrl: string, prepare?: Pr
   return { context, page }
 }
 
-/** Enter a room with its arrow button in the sidebar, once the room has shown up there. */
+/**
+ * Enter a room with its arrow button in the sidebar, once the room has shown up there,
+ * then close the sidebar as a person would: it stays open and covers the room's modules.
+ */
 export async function enterRoom(s: Session, room: string) {
   const entry = s.page.getByRole('listbox').filter({ hasText: room })
   await entry.getByRole('button').first().click({ timeout: 45_000 })
+  await closeSideMenu(s)
 }
 
 /**

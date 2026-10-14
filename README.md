@@ -59,6 +59,9 @@ lib/
   modules.ts       serves local modules, finds a module's iframe
   fake-serial.ts   a fake Web Serial device for module iframes
   fake-hexi.ts     a fake of Wokwi's Arduino compile server (hexi.wokwi.com)
+  fake-pyxterm.ts  a fake pyxtermjs terminal server (Socket.IO)
+  pyxterm-server.ts starts the real pyxtermjs server from the local checkout (the one real server)
+  xterm.ts         reads the text of a module's xterm.js terminal (window.term)
 modules/
   <module-name>/   the tests of one module
 ```
@@ -96,6 +99,36 @@ modules/
   hexi.requests                               // the sketches the module sent
   hexi.files                                  // the extra files sent with each sketch (libraries.txt, ...)
   ```
+
+- **Fake terminal server.** `installFakePyxterm(context, { up })` replaces the Socket.IO client that
+  module-pyxtermjs loads from cdnjs with a fake `io` whose sockets talk to an in-page pyxtermjs server. No Python
+  server is needed. Drive it in the frame that holds the socket (the station):
+
+  ```ts
+  await pty(frame).output('hello\r\n')  // the shell prints
+  await pty(frame).inputs()             // every pty-input the server got, in order
+  await pty(frame).resizes()            // every resize the server got
+  await pty(frame).stop()               // server goes away; pty(frame).start() brings it back
+  await pty(frame).connects()           // sockets the module opened (e.g. after a reload)
+  ```
+
+- **The real terminal server.** Servers are faked, with one exception: `startPyxtermServer()` runs the actual
+  pyxtermjs server from `$EDRYS_MODULES/module-pyxtermjs` on a free port, with a plain `bash --norc` behind it. It
+  is for the few tests that check the server itself and the real Socket.IO client against it
+  (`modules/module-pyxtermjs/real-server.spec.ts`). Python is `$PYXTERM_PYTHON`, else the checkout's
+  `venv/bin/python`, else `python3`. The spec skips itself when that Python lacks the server's requirements
+  (`pip install -r requirements.txt` in the module).
+
+  ```ts
+  const server = await startPyxtermServer()
+  server.url      // http://127.0.0.1:<port>/pty, the module's `server` config
+  server.log()    // what the server printed (attach it on failure)
+  await server.stop()
+  ```
+
+- **Reading xterm terminals.** xterm.js does not keep its text in the DOM in a readable order. Modules expose
+  their terminal as `window.term` (module-pyxtermjs, module-serial), and `terminalText(frame)` and
+  `terminalSize(frame)` read its buffer.
 
 `lib/edrys.ts` reaches into the app's Vue tree in a few places (finding the `Peer`, saving the class). It was
 adapted from edrys-Lite's own e2e helpers (`tests/e2e-tests/`); if edrys-Lite changes how the app is mounted or
