@@ -319,7 +319,7 @@ test.describe('module-monaco-editor', () => {
   test('a config saved with the settings form does what the teacher ticked', async ({ browser }) => {
     // What ModuleConfigForm saves when the teacher fills in value and language and
     // ticks only synchronize: other booleans false, radios on their first option,
-    // the rest empty. Review finding #1: this used to switch synchronize off.
+    // the rest empty.
     await start(
       browser,
       withConfig({
@@ -349,6 +349,149 @@ test.describe('module-monaco-editor', () => {
     await expect.poll(() => received(t), { timeout: SYNC }).toContainEqual({
       subject: 'execute',
       body: `${CODE} // from teacher`,
+    })
+  })
+
+  // -------------------------------------------------------------------------
+  // Multi-file mode: `file` in the config, one tab per file
+
+  test.describe('multi-file', () => {
+    const MAIN = 'int main() { return 0; }'
+    const UTIL = '// helpers'
+    const FILES = { 'main.cpp': MAIN, 'util.h': UTIL, 'run.py': 'print(1)' }
+    const MULTI = { ...SHARED, file: FILES }
+
+    const tab = (frame: Frame, name: string) => frame.getByRole('tab', { name })
+
+    /**
+     * Click a tab. The tabs are the iframe's top edge, which scrollTo(start)
+     * leaves under the app bar; Playwright checks the hit target inside the
+     * frame only, so it would click the app bar. Scroll the app back to the
+     * top, where the module starts below the bar.
+     */
+    async function openTab(frame: Frame, name: string) {
+      const element = await frame.frameElement()
+      await element.evaluate((e) => {
+        for (let p = e.parentElement; p; p = p.parentElement) p.scrollTop = 0
+        window.scrollTo(0, 0)
+      })
+      await tab(frame, name).click()
+      await expect(tab(frame, name)).toHaveAttribute('aria-selected', 'true')
+    }
+
+    test('shows one tab per file, each with its own code and language', async ({ browser }) => {
+      await start(browser, withConfig(MULTI))
+      const t = await ready(teacher!)
+      const stu = await ready(student!)
+
+      for (const frame of [t, stu]) {
+        await expect(frame.getByRole('tab')).toHaveText(Object.keys(FILES))
+        await expect(tab(frame, 'main.cpp')).toHaveAttribute('aria-selected', 'true')
+        await expect.poll(() => code(frame)).toBe(MAIN)
+      }
+
+      // the language follows the extension; there is no selector to override it
+      await expect(languageSelect(t)).toBeHidden()
+      await expect(languageBadge(stu)).toHaveText('cpp')
+      await openTab(stu, 'run.py')
+      await expect.poll(() => code(stu)).toBe('print(1)')
+      await expect(languageBadge(stu)).toHaveText('python')
+    })
+
+    test('an edit reaches the other peers in the same file only', async ({ browser }) => {
+      await start(browser, withConfig(MULTI))
+      const t = await ready(teacher!)
+      const stu = await ready(student!)
+
+      await openTab(t, 'util.h')
+      await typeAtEnd(t, ' edited')
+
+      // the student is still on main.cpp, which is unchanged
+      await openTab(stu, 'util.h')
+      await expect.poll(() => code(stu), { timeout: SYNC }).toBe(`${UTIL} edited`)
+      await openTab(stu, 'main.cpp')
+      expect(await code(stu)).toBe(MAIN)
+    })
+
+    test('Execute sends every file as {"file": ...}', async ({ browser }) => {
+      await start(browser, withConfig({ ...MULTI, runCommand: 'e2e-run' }))
+      const t = await ready(teacher!)
+      const stu = await ready(student!)
+      await expect.poll(() => code(stu)).toBe(MAIN)
+      await listen(t)
+
+      await openTab(stu, 'util.h')
+      await typeAtEnd(stu, ' edited')
+      await press(stu, execute)
+
+      const expected = JSON.stringify({ file: { ...FILES, 'util.h': `${UTIL} edited` } })
+      await expect.poll(() => received(t), { timeout: SYNC }).toContainEqual({ subject: 'e2e-run', body: expected })
+    })
+
+    test('Reset restores every file', async ({ browser }) => {
+      await start(browser, withConfig(MULTI))
+      const t = await ready(teacher!)
+      const stu = await ready(student!)
+
+      await typeAtEnd(stu, ' // broken')
+      await openTab(stu, 'util.h')
+      await typeAtEnd(stu, ' broken')
+      await expect.poll(() => code(t), { timeout: SYNC }).toBe(`${MAIN} // broken`)
+
+      await press(t, reset)
+      await expect.poll(() => code(stu), { timeout: SYNC }).toBe(UTIL)
+      await openTab(stu, 'main.cpp')
+      await expect.poll(() => code(stu), { timeout: SYNC }).toBe(MAIN)
+    })
+
+    test('a student who joins later sees the edits in every file', async ({ browser }) => {
+      await start(browser, withConfig(MULTI))
+      const t = await ready(teacher!)
+      await openTab(t, 'util.h')
+      await typeAtEnd(t, ' edited')
+
+      const late = await addStudent(browser, classUrl)
+      try {
+        const frame = await ready(late)
+        await expect.poll(() => code(frame), { timeout: SYNC }).toBe(MAIN)
+        await openTab(frame, 'util.h')
+        await expect.poll(() => code(frame), { timeout: SYNC }).toBe(`${UTIL} edited`)
+      } finally {
+        await closeSessions(late)
+      }
+    })
+
+    test("a peer's caret shows only in the file it is in", async ({ browser }) => {
+      await start(browser, withConfig(MULTI))
+      const t = await ready(teacher!)
+      const stu = await ready(student!)
+      const caret = (frame: Frame) => frame.locator('.yRemoteSelectionHead')
+
+      // the teacher's caret sits in util.h; the student looks at main.cpp
+      await openTab(t, 'util.h')
+      await typeAtEnd(t, ' here')
+      await openTab(stu, 'util.h')
+      await expect(caret(stu)).toHaveCount(1, { timeout: SYNC })
+
+      await openTab(stu, 'main.cpp')
+      await expect(caret(stu)).toHaveCount(0)
+
+      // and it is drawn again on the way back
+      await openTab(stu, 'util.h')
+      await expect(caret(stu)).toHaveCount(1)
+    })
+
+    test('without synchronize, the tabs still work locally', async ({ browser }) => {
+      await start(browser, withConfig({ file: FILES }))
+      const stu = await ready(student!)
+      await expect(stu.locator('#sync-dot')).toHaveAttribute('aria-label', /^Local only/)
+
+      await openTab(stu, 'util.h')
+      await expect.poll(() => code(stu)).toBe(UTIL)
+      await typeAtEnd(stu, ' mine')
+      await openTab(stu, 'main.cpp')
+      await openTab(stu, 'util.h')
+      expect(await code(stu)).toBe(`${UTIL} mine`)
     })
   })
 })
