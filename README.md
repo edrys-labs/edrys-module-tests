@@ -20,12 +20,12 @@ You need Node 24 and an edrys-Lite checkout.
    npm run watch
    ```
 
-2. Install the test dependencies and the browser:
+2. Install the test dependencies and the browsers:
 
    ```bash
    cd edrys-module-tests
    npm install
-   npx playwright install chromium
+   npx playwright install chromium        # add firefox webkit for the other projects
    ```
 
 The tests expect the modules next to this folder (`Edrys_Modules/module-serial`, …). Set `EDRYS_MODULES` if they
@@ -39,14 +39,22 @@ npx playwright test modules/module-serial        # one module
 npx playwright test -g "late"                    # tests whose name matches
 npm run test:headed                              # watch the browsers
 npm run report                                   # HTML report of the last run
+npx playwright test --project=firefox            # one browser (chromium, firefox, webkit)
+npm run typecheck                                # type-check lib/ and modules/ (Playwright itself does not)
 ```
 
 Tests run one at a time: the peers of parallel tests would share the signaling server.
+
+Without `--project`, every test runs in Chromium, Firefox and WebKit. Where a browser cannot run a test, the test
+skips itself with the reason. For example, Playwright's WebKit on Linux sends no frames of a canvas-captured
+track over WebRTC, so the module-streaming tests that need a picture from a WebKit station are skipped.
 
 | Variable        | Default                 | Meaning                                    |
 | --------------- | ----------------------- | ------------------------------------------ |
 | `E2E_BASE_URL`  | `http://localhost:6999` | the edrys-Lite to test against             |
 | `EDRYS_MODULES` | the parent folder       | where the module checkouts are             |
+| `STREAM_RELAY_DIR` | `../websocket-server` (next to `Edrys_Modules`) | the websocket-server checkout for the real relay tests |
+| `PYXTERM_PYTHON` | the checkout's venv, else `python3` | Python for the real pyxtermjs server |
 
 A failed test keeps screenshots of every open page and a trace in `test-results/`. Open a trace with
 `npx playwright show-trace <path>/trace.zip`.
@@ -60,8 +68,13 @@ lib/
   fake-serial.ts   a fake Web Serial device for module iframes
   fake-hexi.ts     a fake of Wokwi's Arduino compile server (hexi.wokwi.com)
   fake-pyxterm.ts  a fake pyxtermjs terminal server (Socket.IO)
-  pyxterm-server.ts starts the real pyxtermjs server from the local checkout (the one real server)
+  pyxterm-server.ts starts the real pyxtermjs server from the local checkout; also exports freePort()
   xterm.ts         reads the text of a module's xterm.js terminal (window.term)
+  fake-media.ts    fake cameras and a microphone for module iframes (getUserMedia, enumerateDevices)
+  fake-peerjs.ts   a fake PeerJS cloud signaling server (Edrys.sendStream / onStream, method webrtc)
+  fake-ws-relay.ts a fake of websocket-server's /stream relay (method websocket)
+  local-webrtc.ts  keeps WebRTC between the test browsers on this machine (no STUN/TURN, no mDNS in Chromium)
+  stream-servers.ts starts the real PeerJS server (`peer` package) and the real /stream relay
 modules/
   <module-name>/   the tests of one module
 ```
@@ -112,7 +125,51 @@ modules/
   await pty(frame).connects()           // sockets the module opened (e.g. after a reload)
   ```
 
-- **The real terminal server.** Servers are faked, with one exception: `startPyxtermServer()` runs the actual
+- **Fake cameras.** `installFakeMedia(context, { cameras: ['red', 'blue'] })` gives module iframes cameras that
+  show one solid colour each (labels "Fake camera 1", "Fake camera 2", …) and a microphone (an oscillator). It
+  replaces `getUserMedia` and `enumerateDevices`, and provides `navigator.mediaDevices` itself, because the
+  test module origin is not a secure context. `{ blocked: 'NotAllowedError' }` makes every call fail. Drive it
+  per frame, and tell which camera a `<video>` shows by its colour:
+
+  ```ts
+  await media(frame).calls()                   // constraints of every getUserMedia call
+  await media(frame).liveTracks('video')       // tracks handed out and not stopped yet
+  await media(frame).denyNext('NotReadableError') // the next call fails (camera in use)
+  await media(frame).unplug()                  // the camera is lost: live video tracks end
+  nearestColor(await videoColor(frame))        // 'red', 'blue', … or null (no picture)
+  ```
+
+  Chromium does not render an off-screen cross-origin iframe, so a fake camera in it sends black frames. Scroll
+  the frame into view before reading its colour (module-streaming's `expectCamera` does this), but only when it
+  is fully off-screen. A visible frame scrolled to the top slides under edrys-Lite's fixed app bar, and clicks
+  on the module's top row then hit the app bar.
+- **Fake stream servers.** For `Edrys.sendStream` / `Edrys.onStream`:
+  - `FakePeerServer` answers the PeerJS cloud (`0.peerjs.com`) for the `webrtc` method. Media still flows
+    between the browsers over real WebRTC. Create one per test and call `install(context)` in every context:
+
+    ```ts
+    peerjs.ids()                   // peers connected right now (stream_<hash> is a station's stream)
+    peerjs.dropMediaAnswers = true // media calls never connect, as when ICE fails
+    peerjs.close()                 // in afterEach
+    ```
+
+  - `FakeStreamRelay` stands in for websocket-server's `/stream` relay for the `websocket` method. Set the
+    module's `websocketUrl` to `relay.url`. `relay.rooms()` reports per room whether a source is registered,
+    how many viewers there are, and how many chunks were relayed.
+- **Local WebRTC.** `installLocalWebRTC(context)` removes the STUN/TURN servers in module iframes, and
+  `test.use({ launchOptions: localWebRTCLaunchOptions })` turns off Chromium's mDNS host candidates. Without them,
+  some media connections between the test browsers never got past ICE checking.
+- **Real stream servers.** `modules/module-streaming/real-server.spec.ts` checks the module against the real
+  servers, to catch protocol drift in the fakes:
+
+  ```ts
+  const peer = await startPeerServer()   // in this process, free port; stationConfig.peerServerConfig = peer.config
+  const relay = await startStreamRelay() // websocket-server checkout; stationConfig.websocketUrl = relay.url
+  ```
+
+  The relay is `$STREAM_RELAY_DIR`, else `websocket-server` next to the `Edrys_Modules` folder. Its tests skip
+  themselves when the checkout or its `node_modules` is missing.
+- **The real terminal server.** Most servers are faked; `startPyxtermServer()` runs the actual
   pyxtermjs server from `$EDRYS_MODULES/module-pyxtermjs` on a free port, with a plain `bash --norc` behind it. It
   is for the few tests that check the server itself and the real Socket.IO client against it
   (`modules/module-pyxtermjs/real-server.spec.ts`). Python is `$PYXTERM_PYTHON`, else the checkout's
