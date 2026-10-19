@@ -63,8 +63,8 @@ A failed test keeps screenshots of every open page and a trace in `test-results/
 
 ```
 lib/
-  edrys.ts         drives edrys-Lite: create a class, open the station, join, enter a room, set modules
-  modules.ts       serves local modules, finds a module's iframe
+  edrys.ts         drives edrys-Lite: create a class, open (and reload) the station, join, enter a room, set modules
+  modules.ts       serves local modules, finds a module's iframe, scrolls its top row clear of the app bar
   fake-serial.ts   a fake Web Serial device for module iframes
   fake-hexi.ts     a fake of Wokwi's Arduino compile server (hexi.wokwi.com)
   fake-pyxterm.ts  a fake pyxtermjs terminal server (Socket.IO)
@@ -88,7 +88,9 @@ modules/
 - **Adding a module.** `setModules()` saves the class configuration through the same call the Settings dialog
   uses, with any `config` / `studentConfig` / `teacherConfig` / `stationConfig`.
 - **The station.** It opens as a second page in the teacher's browser, because a station has to share the
-  teacher's identity. The "Station Mode Active" popup is clicked away, as a user would.
+  teacher's identity. The "Station Mode Active" popup is clicked away, as a user would. `reloadStation(station)`
+  reloads the station window like F5 and clicks the popup away again (e.g. to check that data kept in the
+  station's browser survives a reload).
 - **Fake hardware.** `installFakeSerial()` replaces `navigator.serial` in module iframes with one fake device.
   Tests drive it from outside:
 
@@ -216,6 +218,9 @@ how Settings saves a class, update it there.
    (`moduleFrame(session, 'module-x', 30_000, 'some unique string')`) to find them.
    The class's side menu (rooms and users) is a drawer that overlays the left part of the modules; call
    `closeSideMenu(session)` before clicking there or taking screenshots.
+   edrys-Lite's app bar is fixed: once a click further down a frame has scrolled the page, the frame's top row
+   (header controls, back buttons) can sit under the bar, and a click there lands on the bar's home link. Call
+   `revealModuleTop(frame)` before clicking a module's top row; it also helps with the lower of two modules.
 4. Close the browsers in `afterEach` with `closeSessions(teacher, student)`. The station shares the teacher's
    browser.
 

@@ -59,6 +59,30 @@ export async function serveModules(context: BrowserContext) {
 }
 
 /**
+ * Scroll the page so the top of this module's iframe sits just below edrys-Lite's fixed app bar.
+ *
+ * Use it before clicking a module's top row (header controls, back buttons). After a click further
+ * down the frame, the page may be scrolled so the top row is under the app bar: Playwright still sees
+ * the button as visible, and the click lands on the bar (whose title links home).
+ */
+export async function revealModuleTop(frame: Frame) {
+  const element = await frame.frameElement()
+  await element.evaluate((iframe: HTMLElement) => {
+    // the app bar is 64px high; leave a little room under it
+    const below = 80
+    // edrys-Lite may scroll a container rather than the page: scroll the nearest one that scrolls
+    let scroller: Element | null = iframe.parentElement
+    while (
+      scroller &&
+      !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))
+    ) {
+      scroller = scroller.parentElement
+    }
+    ;(scroller || document.scrollingElement!).scrollBy(0, iframe.getBoundingClientRect().top - below)
+  })
+}
+
+/**
  * The session's iframe of module `name`. Re-resolved each call: frames die on reload and room change.
  *
  * Modules with `<meta name="fetch" content="true">` or a YAML entry point are inlined by edrys-Lite as a

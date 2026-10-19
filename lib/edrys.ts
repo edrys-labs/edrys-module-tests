@@ -71,16 +71,34 @@ export async function openStation(teacher: Session, classUrl: string): Promise<S
   const page = await teacher.context.newPage()
   await page.goto(`${BASE_URL}/?/station/${match[1]}/${match[2]}`)
   await appReady(page)
+  await dismissStationDialog(page)
 
-  // The "Station Mode Active" popup (left side) covers the modules; click
-  // away from it, on the right side of the page.
+  return { context: teacher.context, page }
+}
+
+/**
+ * Reload the station window the way a user does (F5), and wait until it is a
+ * station again. From inside the page: Playwright's page.reload() in Firefox
+ * skips what edrys-Lite does when the station leaves.
+ */
+export async function reloadStation(station: Session) {
+  const loaded = station.page.waitForEvent('load')
+  await station.page.evaluate(() => setTimeout(() => location.reload()))
+  await loaded
+  await appReady(station.page)
+  await dismissStationDialog(station.page)
+}
+
+/**
+ * The "Station Mode Active" popup (left side) covers the modules; click
+ * away from it, on the right side of the page.
+ */
+async function dismissStationDialog(page: Page) {
   const dialog = page.getByText('Station Mode Active')
   await dialog.waitFor({ timeout: 15_000 })
   const viewport = page.viewportSize()!
   await page.mouse.click(viewport.width - 20, viewport.height / 2)
   await expect(dialog).toBeHidden({ timeout: 5_000 })
-
-  return { context: teacher.context, page }
 }
 
 /** The station's room name ("Station <name>"), once its presence is published. */
