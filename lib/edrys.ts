@@ -131,8 +131,14 @@ export async function joinClass(browser: Browser, classUrl: string, prepare?: Pr
 /**
  * Enter a room with its arrow button in the sidebar, once the room has shown up there,
  * then close the sidebar as a person would: it stays open and covers the room's modules.
+ * Opens the sidebar first if it was closed (e.g. moving on from a room entered before).
  */
 export async function enterRoom(s: Session, room: string) {
+  const drawer = s.page.locator('.v-navigation-drawer--temporary').first()
+  if (!(await drawer.evaluate((d) => d.classList.contains('v-navigation-drawer--active')))) {
+    await s.page.locator('.v-app-bar-nav-icon').click()
+    await expect(drawer).toBeInViewport()
+  }
   const entry = s.page.getByRole('listbox').filter({ hasText: room })
   await entry.getByRole('button').first().click({ timeout: 45_000 })
   await closeSideMenu(s)

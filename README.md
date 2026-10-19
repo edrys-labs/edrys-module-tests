@@ -76,6 +76,8 @@ lib/
   fake-ws-relay.ts a fake of websocket-server's /stream relay (method websocket)
   local-webrtc.ts  keeps WebRTC between the test browsers on this machine (no STUN/TURN, no mDNS in Chromium)
   stream-servers.ts starts the real PeerJS server (`peer` package) and the real /stream relay
+  fake-lights.ts   a fake station-lights server (localhost:3000) for station-lights-module
+  lights-server.ts starts the real station-lights server and a fake Elgato light behind it
 modules/
   <module-name>/   the tests of one module
 ```
@@ -204,6 +206,25 @@ modules/
   await server.stop()
   ```
 
+- **Fake light server.** station-lights-module posts to a helper server on the station's machine
+  (`http://localhost:3000`). `new FakeLightServer()` answers it in the browser; `lights.install(context)` in every
+  context that should reach it. Each request remembers the page (tab) whose frame sent it, because the station
+  shares the teacher's context:
+
+  ```ts
+  lights.lights(station.page)      // bodies of POST /api/light from the station
+  lights.heartbeats(station.page)  // bodies of POST /api/heartbeat
+  lights.from(student.page)        // every request a page's module frames made
+  lights.down = true               // requests fail like a refused connection
+  lights.status = 500              // the server answers with an error
+  ```
+
+- **The real light server.** `modules/station-lights-module/real-server.spec.ts` runs the module's own
+  `station-lights-server` (its heartbeat timeouts are not in the fake). `startFakeElgato()` listens on
+  127.0.0.1:9123 (use `127.0.0.1` as `lightIp`; `elgato.on`, `elgato.puts`), `startLightsServer()` starts
+  `server.js` (allowing CORS from the test module origin) and `server.route(context)` forwards the module's requests
+  to it through Playwright; `server.requests` lists the forwarded paths. Both ports are fixed in `server.js`; the
+  spec skips itself when they are taken or the server's `node_modules` is missing.
 - **Reading xterm terminals.** xterm.js does not keep its text in the DOM in a readable order. Modules expose
   their terminal as `window.term` (module-pyxtermjs, module-serial), and `terminalText(frame)` and
   `terminalSize(frame)` read its buffer.
