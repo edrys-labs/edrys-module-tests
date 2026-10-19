@@ -68,6 +68,7 @@ lib/
   fake-serial.ts   a fake Web Serial device for module iframes
   fake-hexi.ts     a fake of Wokwi's Arduino compile server (hexi.wokwi.com)
   fake-pyxterm.ts  a fake pyxtermjs terminal server (Socket.IO)
+  fake-webrepl.ts  a fake MicroPython board with WebREPL (WebSocket, password, REPL, file put/get)
   pyxterm-server.ts starts the real pyxtermjs server from the local checkout; also exports freePort()
   xterm.ts         reads the text of a module's xterm.js terminal (window.term)
   fake-media.ts    fake cameras and a microphone for module iframes (getUserMedia, enumerateDevices)
@@ -125,6 +126,24 @@ modules/
   await pty(frame).resizes()            // every resize the server got
   await pty(frame).stop()               // server goes away; pty(frame).start() brings it back
   await pty(frame).connects()           // sockets the module opened (e.g. after a reload)
+  ```
+
+- **Fake MicroPython board.** `new FakeWebRepl()` is a board with WebREPL enabled; `board.install(context)`
+  answers WebSockets to `ws://webrepl.test…` with it through Playwright's `routeWebSocket`, so neither a board nor
+  `proxy.py` is needed. Use `board.url` as the module's `websocket` station config. The board lives in the test
+  process and asks for `board.password` first, like a real one; drive it directly:
+
+  ```ts
+  board.print('hello\r\n')         // the board prints on every open connection
+  board.lines                      // REPL lines it received after login, in order
+  board.files                      // its file system (Map name -> Buffer); put/get transfers use it
+  board.executed                   // every exec(open('<file>').read()): file and content at that moment
+  board.putAckDelay = 3000         // a put is stored and confirmed later (slow board, large file)
+  board.disconnect()               // the board drops every connection
+  board.down = true                // the board is off: new connections are closed right away
+  board.interrupts                 // Ctrl-C received (it also drops the line being typed)
+  board.replies.set('1+1', '2')    // what the board prints for a REPL line, before the next prompt
+  board.open, board.connections    // connections open now / opened so far
   ```
 
 - **Fake cameras.** `installFakeMedia(context, { cameras: ['red', 'blue'] })` gives module iframes cameras that
