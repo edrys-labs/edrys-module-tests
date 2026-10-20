@@ -414,8 +414,13 @@ test.describe('module-arduinoview', () => {
     expect(await sandbox(st).locator('#esc').textContent()).toBe('a\x10b')
 
     // and towards the Arduino: a text input value with the framing bytes in it
-    await sandbox(st).locator('#_SD_TE').fill('x\x01\x04\x10y')
-    await sandbox(st).locator('#_SD_TE').press('Enter')
+    // set directly: typing them (fill) drops control characters in Firefox
+    await sandbox(st)
+      .locator('#_SD_TE')
+      .evaluate((input: HTMLInputElement) => {
+        input.value = 'x\x01\x04\x10y'
+        input.dispatchEvent(new Event('change'))
+      })
     await expect.poll(() => framesWritten(st), { timeout: SYNC }).toContain('!gTEx\x01\x04\x10y')
   })
 

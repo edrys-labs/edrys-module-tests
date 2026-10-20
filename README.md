@@ -80,6 +80,7 @@ lib/
   lights-server.ts starts the real station-lights server and a fake Elgato light behind it
 modules/
   <module-name>/   the tests of one module
+  edrys-api/       tests of the module API (edrys.js) itself, with fixture modules defined in the spec
 ```
 
 ## How it works
