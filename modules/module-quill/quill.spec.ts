@@ -459,9 +459,7 @@ test.describe('module-quill', () => {
       await typeAtEnd(await ready(late), ' world')
       await expect(cursor).toHaveCount(2, { timeout: SYNC })
       await late.page.close({ runBeforeUnload: true })
-      // The page's own "cursor gone" update cannot be relayed while edrys-Lite closes, and
-      // edrys-Lite does not drop a departed peer's awareness; y-protocols drops it after 30 s.
-      await expect(cursor).toHaveCount(1, { timeout: 45_000 })
+      await expect(cursor).toHaveCount(1, { timeout: SYNC })
     } finally {
       await closeSessions(late)
     }
