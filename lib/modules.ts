@@ -1,4 +1,4 @@
-import { BrowserContext, Frame, expect } from '@playwright/test'
+import { BrowserContext, Frame, Route, expect } from '@playwright/test'
 import { existsSync, readFileSync, statSync } from 'fs'
 import { extname, join, normalize, resolve } from 'path'
 import { BASE_URL, Session } from './edrys'
@@ -35,27 +35,48 @@ export function moduleUrl(name: string, entry = '') {
   return `${MODULE_ORIGIN}/${name}/${entry}`
 }
 
+/** Answer `route` with the file at `path` below `root`. */
+async function fulfillFrom(route: Route, root: string, path: string) {
+  let file = normalize(join(root, path))
+  if (!file.startsWith(root)) return route.fulfill({ status: 403 })
+  if (existsSync(file) && statSync(file).isDirectory()) file = join(file, 'index.html')
+  if (!existsSync(file)) return route.fulfill({ status: 404, body: `not found: ${path}` })
+  await route.fulfill({
+    status: 200,
+    contentType: CONTENT_TYPES[extname(file)] || 'application/octet-stream',
+    // scrapeModule fetches the entry point from the app's origin
+    headers: { 'Access-Control-Allow-Origin': '*' },
+    body: readFileSync(file),
+  })
+}
+
 /** Context hook: serve local modules and the local edrys.js. */
 export async function serveModules(context: BrowserContext) {
-  await context.route(`${MODULE_ORIGIN}/**`, async (route) => {
-    const path = decodeURIComponent(new URL(route.request().url()).pathname)
-    let file = normalize(join(MODULES_DIR, path))
-    if (!file.startsWith(MODULES_DIR)) return route.fulfill({ status: 403 })
-    if (existsSync(file) && statSync(file).isDirectory()) file = join(file, 'index.html')
-    if (!existsSync(file)) return route.fulfill({ status: 404, body: `not found: ${path}` })
-    await route.fulfill({
-      status: 200,
-      contentType: CONTENT_TYPES[extname(file)] || 'application/octet-stream',
-      // scrapeModule fetches the entry point from the app's origin
-      headers: { 'Access-Control-Allow-Origin': '*' },
-      body: readFileSync(file),
-    })
-  })
+  await context.route(`${MODULE_ORIGIN}/**`, (route) =>
+    fulfillFrom(route, MODULES_DIR, decodeURIComponent(new URL(route.request().url()).pathname))
+  )
 
   await context.route(PUBLISHED_EDRYS_JS, async (route) => {
     const response = await route.fetch({ url: `${BASE_URL}/module/edrys.js` })
     await route.fulfill({ response })
   })
+}
+
+/**
+ * Context hook: answer a module's published URL from a folder of the local checkout.
+ *
+ * For built modules whose committed build loads its own files by absolute URL (Parcel's
+ * `--public-url`), e.g. module-arduinoview's `docs/`:
+ *
+ *   servePublished(context, 'https://edrys-labs.github.io/module-arduinoview/', 'module-arduinoview/docs')
+ *
+ * Those files then come from a different origin than the entry point, unlike in production.
+ */
+export async function servePublished(context: BrowserContext, publishedPrefix: string, localDir: string) {
+  const root = join(MODULES_DIR, localDir)
+  await context.route(`${publishedPrefix}**`, (route) =>
+    fulfillFrom(route, root, decodeURIComponent(route.request().url().slice(publishedPrefix.length).split(/[?#]/)[0]))
+  )
 }
 
 /**

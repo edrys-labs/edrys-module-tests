@@ -15,14 +15,22 @@ import { MODULE_ORIGIN } from './modules'
  * fires `disconnect` on unplug.
  */
 
-/** Context hook: install the fake in every module iframe of this context. */
-export async function installFakeSerial(context: BrowserContext) {
-  await context.addInitScript(fakeSerial, MODULE_ORIGIN)
+/**
+ * Context hook: install the fake in every module iframe of this context.
+ *
+ * `rememberGrants`: like a real browser, a port chosen once in the picker is
+ * returned by `getPorts()` after a reload too (kept in the module origin's
+ * localStorage). Off by default: then `getPorts()` only knows ports chosen
+ * since the page loaded.
+ */
+export async function installFakeSerial(context: BrowserContext, { rememberGrants = false } = {}) {
+  await context.addInitScript(fakeSerial, { moduleOrigin: MODULE_ORIGIN, rememberGrants })
 }
 
 // Runs in the page; must be self-contained.
-function fakeSerial(moduleOrigin: string) {
+function fakeSerial({ moduleOrigin, rememberGrants }: { moduleOrigin: string; rememberGrants: boolean }) {
   if (location.origin !== moduleOrigin) return
+  const GRANT_KEY = '__fakeSerialGranted'
 
   const encoder = new TextEncoder()
   const decoder = new TextDecoder()
@@ -95,10 +103,12 @@ function fakeSerial(moduleOrigin: string) {
         control.cancelNextRequest = false
         throw new DOMException('No port selected by the user.', 'NotFoundError')
       }
+      if (rememberGrants) localStorage.setItem(GRANT_KEY, '1')
       return port
     }
     async getPorts() {
-      return control.requests > 0 ? [port] : []
+      const granted = control.requests > 0 || (rememberGrants && localStorage.getItem(GRANT_KEY) === '1')
+      return granted ? [port] : []
     }
   })()
 

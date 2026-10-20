@@ -64,7 +64,7 @@ A failed test keeps screenshots of every open page and a trace in `test-results/
 ```
 lib/
   edrys.ts         drives edrys-Lite: create a class, open (and reload) the station, join, enter a room, set modules
-  modules.ts       serves local modules, finds a module's iframe, scrolls its top row clear of the app bar
+  modules.ts       serves local modules (and a built module's published URL), finds a module's iframe, scrolls its top row clear of the app bar
   fake-serial.ts   a fake Web Serial device for module iframes
   fake-hexi.ts     a fake of Wokwi's Arduino compile server (hexi.wokwi.com)
   fake-pyxterm.ts  a fake pyxtermjs terminal server (Socket.IO)
@@ -88,6 +88,11 @@ modules/
   `$EDRYS_MODULES/<module-name>/…`, so the module runs cross-origin from the app, as in production. The module's
   published `edrys.js` is swapped for the one of the edrys-Lite under test, so module and host use the same API
   version.
+- **Built modules with absolute URLs.** Some committed builds load their own files by absolute URL (Parcel's
+  `--public-url`, e.g. module-arduinoview's `docs/` loads `https://edrys-labs.github.io/module-arduinoview/…`).
+  `servePublished(context, 'https://edrys-labs.github.io/module-arduinoview/', 'module-arduinoview/docs')`
+  answers that prefix from the local folder. Those files then come from a different origin than the entry point,
+  unlike in production.
 - **Adding a module.** `setModules()` saves the class configuration through the same call the Settings dialog
   uses, with any `config` / `studentConfig` / `teacherConfig` / `stationConfig`.
 - **The station.** It opens as a second page in the teacher's browser, because a station has to share the
@@ -103,7 +108,12 @@ modules/
   await serial(frame).fail()             // recoverable read error (e.g. wrong baud)
   await serial(frame).unplug()           // device lost
   await serial(frame).cancelNextRequest() // the user cancels the port picker
+  await serial(frame).failNextOpen('busy') // open() rejects with this message
   ```
+
+  `getPorts()` returns the device once the picker chose it on this page. With
+  `installFakeSerial(context, { rememberGrants: true })` it also does after a reload, like a real browser keeps the
+  permission (for modules that auto-connect).
 
 - **Fake compile server.** `installFakeHexi(context)` answers `https://hexi.wokwi.com/**` (used by module-avr8js
   to compile sketches) from recorded responses, so no network is needed. Record a real response once with curl,
