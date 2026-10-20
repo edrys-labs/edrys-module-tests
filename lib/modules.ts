@@ -1,6 +1,6 @@
 import { BrowserContext, Frame, Route, expect } from '@playwright/test'
 import { existsSync, readFileSync, statSync } from 'fs'
-import { extname, join, normalize, resolve } from 'path'
+import { extname, isAbsolute, join, normalize, resolve } from 'path'
 import { BASE_URL, Session } from './edrys'
 
 /**
@@ -15,6 +15,11 @@ import { BASE_URL, Session } from './edrys'
  */
 
 export const MODULE_ORIGIN = 'http://e2e-module.test'
+/**
+ * The same modules over https. A frame is a secure context only if all its ancestors are, so a module whose own
+ * child frames need one (e.g. crypto.subtle in the hosted LiaScript player) is added with `moduleUrl(…, { secure })`.
+ */
+export const SECURE_MODULE_ORIGIN = 'https://e2e-module.test'
 export const MODULES_DIR = resolve(process.env.EDRYS_MODULES || join(__dirname, '..', '..'))
 
 const PUBLISHED_EDRYS_JS = 'https://edrys-labs.github.io/module/edrys.js'
@@ -28,11 +33,16 @@ const CONTENT_TYPES: Record<string, string> = {
   '.svg': 'image/svg+xml',
   '.png': 'image/png',
   '.wasm': 'application/wasm',
+  '.woff2': 'font/woff2',
+  '.woff': 'font/woff',
+  '.ttf': 'font/ttf',
+  '.ico': 'image/x-icon',
+  '.webmanifest': 'application/manifest+json',
 }
 
-/** URL of a module's entry point, as a teacher would add it. */
-export function moduleUrl(name: string, entry = '') {
-  return `${MODULE_ORIGIN}/${name}/${entry}`
+/** URL of a module's entry point, as a teacher would add it. `secure` serves it from SECURE_MODULE_ORIGIN. */
+export function moduleUrl(name: string, entry = '', options: { secure?: boolean } = {}) {
+  return `${options.secure ? SECURE_MODULE_ORIGIN : MODULE_ORIGIN}/${name}/${entry}`
 }
 
 /** Answer `route` with the file at `path` below `root`. */
@@ -52,9 +62,11 @@ async function fulfillFrom(route: Route, root: string, path: string) {
 
 /** Context hook: serve local modules and the local edrys.js. */
 export async function serveModules(context: BrowserContext) {
-  await context.route(`${MODULE_ORIGIN}/**`, (route) =>
-    fulfillFrom(route, MODULES_DIR, decodeURIComponent(new URL(route.request().url()).pathname))
-  )
+  for (const origin of [MODULE_ORIGIN, SECURE_MODULE_ORIGIN]) {
+    await context.route(`${origin}/**`, (route) =>
+      fulfillFrom(route, MODULES_DIR, decodeURIComponent(new URL(route.request().url()).pathname))
+    )
+  }
 
   await context.route(PUBLISHED_EDRYS_JS, async (route) => {
     const response = await route.fetch({ url: `${BASE_URL}/module/edrys.js` })
@@ -73,7 +85,8 @@ export async function serveModules(context: BrowserContext) {
  * Those files then come from a different origin than the entry point, unlike in production.
  */
 export async function servePublished(context: BrowserContext, publishedPrefix: string, localDir: string) {
-  const root = join(MODULES_DIR, localDir)
+  // relative to the modules, or absolute (e.g. a build of another project)
+  const root = isAbsolute(localDir) ? localDir : join(MODULES_DIR, localDir)
   await context.route(`${publishedPrefix}**`, (route) =>
     fulfillFrom(route, root, decodeURIComponent(route.request().url().slice(publishedPrefix.length).split(/[?#]/)[0]))
   )
@@ -111,10 +124,10 @@ export async function revealModuleTop(frame: Frame) {
  * occurs in the module's HTML (e.g. a string from its script), which identifies the `data:` frame.
  */
 export async function moduleFrame(s: Session, name: string, timeout = 30_000, inline?: string): Promise<Frame> {
-  const prefix = moduleUrl(name)
+  const prefixes = [moduleUrl(name), moduleUrl(name, '', { secure: true })]
   // edrys-Lite encodes the inlined HTML with escape()
   const matches = (url: string) =>
-    url.startsWith(prefix) || (!!inline && url.startsWith('data:') && unescape(url).includes(inline))
+    prefixes.some((prefix) => url.startsWith(prefix)) || (!!inline && url.startsWith('data:') && unescape(url).includes(inline))
   let frame: Frame | undefined
   await expect
     .poll(

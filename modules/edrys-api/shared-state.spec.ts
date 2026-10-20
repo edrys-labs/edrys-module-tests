@@ -1,5 +1,5 @@
 import { BrowserContext, Frame, expect, test } from '@playwright/test'
-import { Session, closeSessions, createClass, inPeer, joinClass, setModules } from '../../lib/edrys'
+import { Session, closeSessions, createClass, enterRoom, inPeer, joinClass, setModules } from '../../lib/edrys'
 import { MODULE_ORIGIN, moduleUrl, serveModules } from '../../lib/modules'
 
 /**
@@ -14,6 +14,10 @@ import { MODULE_ORIGIN, moduleUrl, serveModules } from '../../lib/modules'
  * The module is a test fixture, answered by the route below at the module origin, as `a.html`
  * and `b.html`. Frame a (on the teacher) creates the shared Y.Text; both show its content and the
  * awareness labels ("<frame> <role>") of the other clients in the same state key.
+ *
+ * A module frame that loads later (room switch, reload) used to see only awareness changes, so
+ * idle peers showed up only when y-protocols renewed their state (every 15 s); edrys-Lite now
+ * hands a loading frame every current state.
  *
  * Runs over both transports: they detect a departed peer differently (WebRTC: the connection
  * closes; WebSocket: heartbeats stop, ~15-22 s), and only the signed leave is fast on both.
@@ -104,10 +108,6 @@ for (const transport of ['webrtc', 'ws'] as const) {
     let teacher: Session | undefined
     let student: Session | undefined
 
-    // Over WebSocket a joining peer's first module awareness gets lost and only arrives with
-    // y-protocols' renewal (~15 s): a separate bug (see the module-quill review), not under test here.
-    const ARRIVE = transport === 'ws' ? 35_000 : SYNC
-
     test.afterEach(async () => {
       await closeSessions(teacher, student)
       teacher = student = undefined
@@ -151,7 +151,7 @@ for (const transport of ['webrtc', 'ws'] as const) {
       await expect(peers(a)).toContainText(['b teacher'], { timeout: SYNC })
       await expect(peers(b)).toContainText(['a teacher'], { timeout: SYNC })
       await expect
-        .poll(async () => (await peers(a).allTextContents()).sort(), { timeout: ARRIVE })
+        .poll(async () => (await peers(a).allTextContents()).sort(), { timeout: SYNC })
         .toEqual(['a student', 'b student', 'b teacher'])
     })
 
@@ -160,7 +160,7 @@ for (const transport of ['webrtc', 'ws'] as const) {
       await ready(student!, 'a')
       await ready(student!, 'b')
       await expect
-        .poll(async () => (await peers(a).allTextContents()).sort(), { timeout: ARRIVE })
+        .poll(async () => (await peers(a).allTextContents()).sort(), { timeout: SYNC })
         .toEqual(['a student', 'b student', 'b teacher'])
 
       const closed = Date.now()
@@ -169,6 +169,23 @@ for (const transport of ['webrtc', 'ws'] as const) {
         .poll(async () => (await peers(a).allTextContents()).sort(), { timeout: LEAVE })
         .toEqual(['b teacher'])
       test.info().annotations.push({ type: 'removed after', description: `${Date.now() - closed} ms` })
+    })
+
+    test("a module that loads later shows the others' awareness at once, without waiting for a renewal", async () => {
+      let a = await ready(teacher!, 'a')
+      await ready(student!, 'a')
+      await ready(student!, 'b')
+      const labels = (frame: Frame) => async () => (await peers(frame).allTextContents()).sort()
+      await expect.poll(labels(a), { timeout: SYNC }).toEqual(['a student', 'b student', 'b teacher'])
+
+      // the student is idle from here; leaving and re-entering the room remounts the teacher's frames
+      await inPeer(teacher!.page, "p.addRoom('Room 1'); return true")
+      await enterRoom(teacher!, 'Room 1')
+      await enterRoom(teacher!, 'Lobby')
+      a = await ready(teacher!, 'a')
+      const loaded = Date.now()
+      await expect.poll(labels(a), { timeout: 3_000 }).toEqual(['a student', 'b student', 'b teacher'])
+      test.info().annotations.push({ type: 'shown after', description: `${Date.now() - loaded} ms` })
     })
   })
 }

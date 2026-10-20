@@ -55,6 +55,7 @@ track over WebRTC, so the module-streaming tests that need a picture from a WebK
 | `EDRYS_MODULES` | the parent folder       | where the module checkouts are             |
 | `STREAM_RELAY_DIR` | `../websocket-server` (next to `Edrys_Modules`) | the websocket-server checkout for the real relay tests |
 | `PYXTERM_PYTHON` | the checkout's venv, else `python3` | Python for the real pyxtermjs server |
+| `LIASCRIPT_BUILD` | unset (the hosted player) | a local LiaScript build (`dist` folder) for the module-liascript tests |
 
 A failed test keeps screenshots of every open page and a trace in `test-results/`. Open a trace with
 `npx playwright show-trace <path>/trace.zip`.
@@ -88,7 +89,9 @@ modules/
 - **Serving modules.** Requests to `http://e2e-module.test/<module-name>/…` are answered from
   `$EDRYS_MODULES/<module-name>/…`, so the module runs cross-origin from the app, as in production. The module's
   published `edrys.js` is swapped for the one of the edrys-Lite under test, so module and host use the same API
-  version.
+  version. `moduleUrl(name, entry, { secure: true })` serves the same files from `https://e2e-module.test`, for
+  modules whose own child frames need a secure context (a frame is one only if all its ancestors are; e.g. the
+  hosted LiaScript player needs `crypto.subtle` for its classroom).
 - **Built modules with absolute URLs.** Some committed builds load their own files by absolute URL (Parcel's
   `--public-url`, e.g. module-arduinoview's `docs/` loads `https://edrys-labs.github.io/module-arduinoview/…`).
   `servePublished(context, 'https://edrys-labs.github.io/module-arduinoview/', 'module-arduinoview/docs')`
