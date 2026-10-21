@@ -129,6 +129,17 @@ async function liaSends(s: Session, subject: string, body: any) {
   ] as const)
 }
 
+/** About 200 KB of Markdown that hardly compresses (pseudo-random words), under one heading. */
+function largeCourse(title: string) {
+  let seed = 1
+  const word = () => {
+    seed = (seed * 1103515245 + 12345) % 2 ** 31
+    return seed.toString(36)
+  }
+  const paragraphs = Array.from({ length: 400 }, () => Array.from({ length: 60 }, word).join(' '))
+  return `# ${title}\n\n${paragraphs.join('\n\n')}\n`
+}
+
 /** A module config that uses the LiaScript under test (the local build, if any). */
 const lia = (config: object) => (LOCAL_BUILD ? { ...config, player: LOCAL_PLAYER } : config)
 
@@ -241,6 +252,27 @@ test.describe('module-liascript', () => {
     student = await addStudent(browser, classUrl)
 
     await expect.poll(() => heading(student!), { timeout: LOAD }).toBe('Grüße → 😀')
+  })
+
+  test('a medium-sized pasted course is compressed into the player URL', async ({ browser }) => {
+    // well over the ~8 KB the player's server accepts in a URL, but compressible
+    const content = `# Medium course\n\n${'The same sentence, again and again. '.repeat(600)}`
+    await setModules(teacher!, [{ url: ENTRY, config: lia({ content }) }])
+    student = await addStudent(browser, classUrl)
+
+    await expect.poll(() => heading(student!), { timeout: LOAD }).toBe('Medium course')
+    expect(String(await playerTarget(student))).toMatch(/^data:text\/plain;gzip;base64,/)
+  })
+
+  test('a large pasted course is handed to LiaScript by the module', async ({ browser }) => {
+    // Review: courses too large for the URL need LiaScript's `parent:` support, not deployed yet
+    test.fail(!LOCAL_BUILD, 'parent: courses need a LiaScript build with the fix')
+
+    await setModules(teacher!, [{ url: ENTRY, config: lia({ content: largeCourse('Large course') }) }])
+    student = await addStudent(browser, classUrl)
+
+    expect(String(await playerTarget(student))).toMatch(/^parent:[0-9a-f]+$/)
+    await expect.poll(() => heading(student!), { timeout: LOAD }).toBe('Large course')
   })
 
   test('a class without a general config shows the empty state', async ({ browser }) => {
