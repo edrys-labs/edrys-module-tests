@@ -123,29 +123,15 @@ test.describe('module-streaming', () => {
   const hasModule = (s: Session) => s.page.frames().some((f) => f.url().startsWith(moduleUrl(MODULE)))
 
   /**
-   * Reload the station window the way a user does; students in its room land in
-   * the lobby meanwhile. From inside the page: Playwright's page.reload() in
-   * Firefox skips what edrys-Lite does when the station leaves, and the room stays.
+   * Reload the station window the way a user does. Students in its room stay
+   * there (edrys-Lite waits for a station that drops out) and keep the module.
+   * From inside the page: Playwright's page.reload() in Firefox skips what
+   * edrys-Lite does when the station leaves.
    */
   async function reloadStation() {
     const loaded = station!.page.waitForEvent('load')
     await station!.page.evaluate(() => setTimeout(() => location.reload()))
     await loaded
-    if (student) {
-      await expect.poll(() => hasModule(student!), { timeout: SYNC }).toBe(false)
-    }
-  }
-
-  /** The student enters the station's room again, as after being sent to the lobby. */
-  async function reenter(s: Session) {
-    // back in the lobby the side menu is closed; enterRoom expects it open
-    const drawer = s.page.locator('.v-navigation-drawer--temporary').first()
-    if (!(await drawer.evaluate((d) => d.classList.contains('v-navigation-drawer--active')))) {
-      await s.page.locator('.v-app-bar-nav-icon').click()
-    }
-    await expect(drawer).toBeInViewport()
-    await enterRoom(s, await stationRoom(station!))
-    return ready(s)
   }
 
   test('the station streams its camera to a student, both show the stream name', async ({ browser, browserName }) => {
@@ -232,7 +218,7 @@ test.describe('module-streaming', () => {
     const st2 = await ready(station!)
     await expect(cameraSelect(st2)).toHaveValue('fake-camera-2')
     await expectCamera(st2, 'blue', 15_000)
-    await expectCamera(await reenter(student!), 'blue')
+    await expectCamera(await ready(student!), 'blue')
   })
 
   test('a student who joins later gets the running stream', async ({ browser, browserName }) => {
@@ -247,17 +233,16 @@ test.describe('module-streaming', () => {
     await expect(streamName(stu)).toHaveText('Bench')
   })
 
-  test('after the station reloads, a student back in its room gets the stream again', async ({ browser, browserName }) => {
+  test('after the station reloads, the student stays in its room and gets the stream again', async ({ browser, browserName }) => {
     test.skip(browserName === 'webkit', NO_WEBKIT_VIDEO)
     await setup(browser, [{ streamName: 'Bench' }])
     await ready(station!)
     await expectCamera(await ready(student!), 'red')
 
-    // edrys-Lite drops the station's room while the station is away, which
-    // sends the student to the lobby; the stream must work once they are back.
     await reloadStation()
     await ready(station!)
-    const stu = await reenter(student!)
+    expect(hasModule(student!)).toBe(true)
+    const stu = await ready(student!)
     await expectCamera(stu, 'red')
     await expect(streamName(stu)).toHaveText('Bench')
   })
