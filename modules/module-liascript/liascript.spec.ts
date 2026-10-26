@@ -265,9 +265,6 @@ test.describe('module-liascript', () => {
   })
 
   test('a large pasted course is handed to LiaScript by the module', async ({ browser }) => {
-    // Review: courses too large for the URL need LiaScript's `parent:` support, not deployed yet
-    test.fail(!LOCAL_BUILD, 'parent: courses need a LiaScript build with the fix')
-
     await setModules(teacher!, [{ url: ENTRY, config: lia({ content: largeCourse('Large course') }) }])
     student = await addStudent(browser, classUrl)
 
@@ -347,9 +344,6 @@ test.describe('module-liascript', () => {
     })
 
     test('after both users connect in LiaScript’s classroom dialog, they see each other and can chat', async () => {
-      // Review finding #2: the hosted LiaScript's Edrys backend never sends its document updates
-      test.fail(!LOCAL_BUILD, 'LiaScript Edrys backend fixed only in a local build so far')
-
       // LiaScript opens its classroom dialog prefilled from the URL (backend Edrys, the room); each user connects
       for (const s of [station!, student!]) {
         await (await player(s)).getByRole('button', { name: 'connect', exact: true }).click({ timeout: LOAD })
