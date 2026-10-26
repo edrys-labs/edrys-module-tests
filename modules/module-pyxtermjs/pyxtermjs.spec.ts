@@ -279,7 +279,8 @@ test.describe('module-pyxtermjs', () => {
   test('the station owns the terminal size: a student resize changes nothing, a station resize reaches the student', async ({ browser }) => {
     const { st, stu } = await setup(browser, { server: SERVER })
     await expect(badge(stu)).toHaveText('connected', { timeout: JOIN })
-    await expect.poll(() => terminalSize(stu), { timeout: SYNC }).toEqual(await terminalSize(st))
+    // the student takes the station's columns; rows may be more, see below
+    await expect.poll(async () => (await terminalSize(stu)).cols, { timeout: SYNC }).toBe((await terminalSize(st)).cols)
 
     // the module waits 50 ms after a resize; give a student's resize time to go out
     await student!.page.setViewportSize({ width: 700, height: 720 })
@@ -287,13 +288,36 @@ test.describe('module-pyxtermjs', () => {
     await flush(stu)
 
     const size = await terminalSize(st)
-    expect(await terminalSize(stu)).toEqual(size)
+    expect((await terminalSize(stu)).cols).toBe(size.cols)
+    expect((await terminalSize(stu)).rows).toBeGreaterThanOrEqual(size.rows)
     expect((await pty(st).resizes()).at(-1)).toEqual(size)
 
     await station!.page.setViewportSize({ width: 900, height: 500 })
     await expect.poll(async () => (await terminalSize(st)).cols).not.toBe(size.cols)
     const resized = await terminalSize(st)
-    await expect.poll(() => terminalSize(stu), { timeout: SYNC }).toEqual(resized)
+    await expect.poll(async () => (await terminalSize(stu)).cols, { timeout: SYNC }).toBe(resized.cols)
     expect((await pty(st).resizes()).at(-1)).toEqual(resized)
+  })
+
+  test('a student frame taller than the station’s fills its height, except while a program owns the screen', async ({ browser }) => {
+    const { st, stu } = await setup(browser, { server: SERVER })
+    await expect(badge(stu)).toHaveText('connected', { timeout: JOIN })
+    // the station's controls and script box take height the student has for rows
+    await station!.page.setViewportSize({ width: 900, height: 500 })
+    await student!.page.setViewportSize({ width: 900, height: 900 })
+    await stu.waitForTimeout(500)
+    await flush(stu)
+    const size = await terminalSize(st)
+
+    await expect.poll(async () => (await terminalSize(stu)).rows, { timeout: SYNC }).toBeGreaterThan(size.rows)
+    expect((await terminalSize(stu)).cols).toBe(size.cols)
+    const tall = (await terminalSize(stu)).rows
+
+    // vim, less, man position and scroll by the station's rows
+    await pty(st).output('\x1b[?1049h')
+    await expect.poll(() => terminalSize(stu), { timeout: SYNC }).toEqual(size)
+    await pty(st).output('\x1b[?1049l')
+    await expect.poll(async () => (await terminalSize(stu)).rows, { timeout: SYNC }).toBe(tall)
+    expect((await pty(st).resizes()).at(-1)).toEqual(size)
   })
 })
