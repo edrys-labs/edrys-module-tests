@@ -10,7 +10,16 @@ import {
   setModules,
   stationRoom,
 } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, serveModules, servePublished } from '../../lib/modules'
+import {
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  serveModules,
+  servePublished,
+  setClassroomTheme,
+} from '../../lib/modules'
 import { installFakeSerial, serial } from '../../lib/fake-serial'
 
 /**
@@ -276,6 +285,24 @@ test.describe('module-arduinoview', () => {
     await serial(st).emit(frame('!h<p id="done">The program was started</p>'))
     await expect(sandbox(st).locator('#done')).toBeVisible()
     await expect(sandbox(stu).locator('#done')).toBeVisible({ timeout: SYNC })
+  })
+
+  test("the module follows the classroom's light or dark theme, the Arduino's GUI stays white", async () => {
+    const st = await ready(station!)
+    const stu = await ready(student!)
+    device = await connectWithGui(st)
+    await expect(sandbox(stu).locator('h1')).toHaveText('ArduinoView', { timeout: SYNC })
+
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(student!, theme)
+      await expect.poll(() => moduleTheme(stu)).toBe(theme)
+      await expect.poll(() => moduleBackground(stu)).toBe(THEME_BACKGROUND[theme])
+      expect(await stu.locator('#sandbox').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe(
+        THEME_BACKGROUND.light,
+      )
+    }
+    // switching keeps the GUI
+    await expect(sandbox(stu).locator('#_SD_GO')).toHaveValue('Start')
   })
 
   test("the station's Reload asks the Arduino for its GUI again", async () => {

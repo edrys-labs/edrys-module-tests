@@ -79,8 +79,8 @@ Each file in `lib/` starts with a comment that shows how to use it.
 
 - **Serving modules.** Requests to `http://e2e-module.test/<module-name>/…` are answered from
   `$EDRYS_MODULES/<module-name>/…`, so the module runs cross-origin from the app, as in production. The module's
-  published `edrys.js` is swapped for the one of the edrys-Lite under test, so module and host use the same API
-  version.
+  published `edrys.js`, `edrys-module.css` and its fonts are swapped for the ones of the edrys-Lite under test, so
+  module and host use the same API version and the same look.
 - **The station** opens as a second page in the teacher's browser, because a station has to share the teacher's
   identity.
 - **Fakes first.** Devices and servers are faked, so tests need no hardware or network and can trigger failures
@@ -88,7 +88,9 @@ Each file in `lib/` starts with a comment that shows how to use it.
   to catch drift in the fakes; they skip themselves when that server's checkout or dependencies are missing.
 - **edrys-Lite internals.** `lib/edrys.ts` reaches into the app's Vue tree in a few places (finding the `Peer`,
   saving the class). It was adapted from edrys-Lite's own e2e helpers (`tests/e2e-tests/`); if edrys-Lite changes
-  how the app is mounted or how Settings saves a class, update it there.
+  how the app is mounted or how Settings saves a class, update it there. `enterRoom` and `closeSideMenu` use the
+  side menu's markup (the "Rooms" button in the app bar, one `button.room-row` per room): if edrys-Lite changes
+  it, every station test fails in its setup, with the student still in the Lobby.
 
 ## Adding tests for a module
 
@@ -124,7 +126,10 @@ What to test, per module:
 - the main flow across peers: an action on one peer shows up on the others;
 - a peer that joins late sees the current state;
 - the module's configuration is applied;
-- the errors users hit (cancelled dialogs, broken connections) are shown, and the module recovers.
+- the errors users hit (cancelled dialogs, broken connections) are shown, and the module recovers;
+- the module follows the classroom's light or dark theme: switch it with `setClassroomTheme(session, theme)` and
+  check `moduleTheme(frame)`, `moduleBackground(frame)` (against `THEME_BACKGROUND`) and whatever the module draws
+  itself (code highlighting via `codeThemes(frame)`, charts, editors).
 
 Assert on what users see: text, badges, terminal content. Use `expect.poll` or `expect(locator)` for anything
 that crosses peers, never fixed sleeps.

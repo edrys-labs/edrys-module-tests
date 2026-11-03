@@ -11,7 +11,16 @@ import {
 } from '../../lib/edrys'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { MODULES_DIR, moduleFrame, moduleUrl, serveModules } from '../../lib/modules'
+import {
+  MODULES_DIR,
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 import { FakeMediaOptions, installFakeMedia, media } from '../../lib/fake-media'
 import { FakePeerServer } from '../../lib/fake-peerjs'
 import { FakeStreamRelay } from '../../lib/fake-ws-relay'
@@ -159,6 +168,26 @@ test.describe('module-streaming', () => {
     // One camera: no camera picker for anyone.
     await expect(cameraSelect(st)).toBeHidden()
     await expect(cameraSelect(stu)).toBeHidden()
+  })
+
+  test("the module follows the classroom's light or dark theme", async ({ browser, browserName }) => {
+    test.skip(browserName === 'webkit', NO_WEBKIT_VIDEO)
+    await setup(browser, [{}])
+    const stu = await ready(student!)
+    await expectCamera(stu, 'red')
+
+    const media = { light: 'rgb(233, 235, 239)', dark: 'rgb(22, 26, 33)' }
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(student!, theme)
+      await expect.poll(() => moduleTheme(stu)).toBe(theme)
+      await expect.poll(() => moduleBackground(stu)).toBe(THEME_BACKGROUND[theme])
+      expect(await stu.locator('.video-container').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe(
+        media[theme],
+      )
+    }
+    // switching keeps the stream
+    await expect(badge(stu)).toHaveText('live')
+    await expectCamera(stu, 'red')
   })
 
   test('stationConfig is applied: quality, mirror and rotation, audio off', async ({ browser, browserName }) => {

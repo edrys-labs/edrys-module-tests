@@ -11,7 +11,16 @@ import {
   openStation,
   setModules,
 } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, serveModules } from '../../lib/modules'
+import {
+  THEME_BACKGROUND,
+  codeThemes,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 
 /**
  * code-logger in a real edrys-Lite: a teacher and a student in the lobby
@@ -174,6 +183,24 @@ test.describe('code-logger', () => {
     await backButton(t).click()
     await expect(badge(t)).toHaveText('idle')
     await expect(startButton(t)).toBeVisible()
+  })
+
+  test("the logger follows the classroom's light or dark theme", async ({ browser }) => {
+    await start(browser)
+    const t = await ready(teacher!)
+    const stu = await sender(student!)
+    await startMonitoring(t)
+    await send(stu, 'int x;')
+    await expect(entries(t)).toHaveCount(1, { timeout: SYNC })
+
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(teacher!, theme)
+      await expect.poll(() => moduleTheme(t)).toBe(theme)
+      await expect.poll(() => moduleBackground(t)).toBe(THEME_BACKGROUND[theme])
+      expect(await codeThemes(t)).toEqual([theme])
+    }
+    // switching keeps the log
+    await expect(codes(t)).toHaveText(['int x;'])
   })
 
   test("a student's Execute in module-monaco-editor is logged on the teacher's side", async ({ browser }) => {

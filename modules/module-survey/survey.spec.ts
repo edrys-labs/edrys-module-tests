@@ -12,7 +12,16 @@ import {
   setModules,
   stationRoom,
 } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, revealModuleTop, serveModules } from '../../lib/modules'
+import {
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  revealModuleTop,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 
 /**
  * module-survey in a real edrys-Lite: a station and a student in the station's
@@ -91,6 +100,10 @@ async function clickTop(frame: Frame, target: Locator) {
   await revealModuleTop(frame)
   await target.click()
 }
+
+/** The colour palette of the SurveyJS theme applied to the survey: 'light' or 'dark'. */
+const surveyPalette = (frame: Frame) =>
+  frame.evaluate(() => (0, eval)('currentSurvey')?.colorPalette as string | undefined).catch(() => undefined)
 
 const startMessage = (frame: Frame) => frame.locator('#startMessage')
 const retryButton = (frame: Frame) => frame.locator('#retryBtn')
@@ -275,6 +288,18 @@ test.describe('module-survey', () => {
     // A station without results says so.
     await openResults(st)
     await expect(st.getByText('No results for this survey yet.')).toBeVisible()
+  })
+
+  test("the survey follows the classroom's light or dark theme", async () => {
+    const stu = await ready(student!)
+    await expect(stu.locator('#surveyTitle')).toHaveText('Lab Feedback')
+
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(student!, theme)
+      await expect.poll(() => moduleTheme(stu)).toBe(theme)
+      await expect.poll(() => moduleBackground(stu)).toBe(THEME_BACKGROUND[theme])
+      await expect.poll(() => surveyPalette(stu)).toBe(theme)
+    }
   })
 
   test("a student's answers are stored at the station and listed there", async () => {

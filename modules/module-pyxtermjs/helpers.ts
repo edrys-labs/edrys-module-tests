@@ -26,7 +26,7 @@ export async function ready(s: Session): Promise<Frame> {
   return frame
 }
 
-export const badge = (frame: Frame) => frame.locator('.status .badge')
+export const badge = (frame: Frame) => frame.locator('#app .edrys-pill')
 export const controls = (frame: Frame) => frame.locator('.controls')
 export const scriptBox = (frame: Frame) => frame.locator('#app textarea')
 export const serverInput = (frame: Frame) => frame.locator('.controls input[type="url"]')

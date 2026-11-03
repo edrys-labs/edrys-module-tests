@@ -2,7 +2,16 @@ import { Browser, BrowserContext, Frame, expect, test } from '@playwright/test'
 import { Session, closeSessions, closeSideMenu, createClass, joinClass, openStation, setModules } from '../../lib/edrys'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { MODULES_DIR, moduleFrame, moduleUrl, serveModules } from '../../lib/modules'
+import {
+  MODULES_DIR,
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 
 /**
  * module-iframe in a real edrys-Lite: a teacher and a student in the lobby
@@ -212,6 +221,24 @@ test.describe('module-iframe', () => {
         { timeout: SYNC }
       )
       await expect(frame.locator('iframe')).toBeHidden()
+    }
+  })
+
+  test("the module follows the classroom's light or dark theme, an embedded page stays on white", async ({
+    browser,
+  }) => {
+    await setModules(teacher!, [{ url: moduleUrl(MODULE, 'index.html') }])
+    student = await addStudent(browser, classUrl)
+    const frame = await moduleFrame(student, MODULE, 30_000, INLINE)
+    await expect(frame.locator('#message')).toContainText('Nothing to show yet', { timeout: SYNC })
+
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(student, theme)
+      await expect.poll(() => moduleTheme(frame)).toBe(theme)
+      await expect.poll(() => moduleBackground(frame)).toBe(THEME_BACKGROUND[theme])
+      expect(await frame.locator('iframe').evaluate((e) => getComputedStyle(e).backgroundColor)).toBe(
+        THEME_BACKGROUND.light,
+      )
     }
   })
 

@@ -1,6 +1,6 @@
 import { Browser, BrowserContext, Frame, Locator, expect, test } from '@playwright/test'
 import { Session, closeSessions, closeSideMenu, createClass, joinClass, openStation, setModules } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, serveModules } from '../../lib/modules'
+import { THEME_BACKGROUND, moduleBackground, moduleFrame, moduleTheme, moduleUrl, serveModules, setClassroomTheme } from '../../lib/modules'
 
 /**
  * module-reference in a real edrys-Lite: a teacher and students in the lobby
@@ -308,5 +308,18 @@ test.describe('module-reference', () => {
     await t.getByRole('button', { name: 'Eval' }).click()
     await expect(result).toHaveText('2')
     await expect(result).not.toHaveClass(/failed/)
+  })
+
+  test("the module and its example editor follow the classroom's light or dark theme", async () => {
+    const t = await ready(teacher!)
+    await tab(t, 'State')
+    const editor = () => t.locator('.CodeMirror').evaluate((e) => getComputedStyle(e).backgroundColor)
+
+    for (const [theme, field] of [['dark', 'rgb(22, 26, 33)'], ['light', 'rgb(255, 255, 255)']] as const) {
+      await setClassroomTheme(teacher!, theme)
+      await expect.poll(() => moduleTheme(t)).toBe(theme)
+      await expect.poll(() => moduleBackground(t)).toBe(THEME_BACKGROUND[theme])
+      await expect.poll(editor).toBe(field)
+    }
   })
 })

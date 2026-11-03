@@ -9,7 +9,15 @@ import {
   setModules,
   stationRoom,
 } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, serveModules } from '../../lib/modules'
+import {
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 import { installFakeSerial, serial } from '../../lib/fake-serial'
 
 /**
@@ -180,6 +188,19 @@ test.describe('module-serial', () => {
       await expect.poll(() => text(frame)).toContain(`Device connected (${BAUD} baud).`)
     } finally {
       await closeSessions(late)
+    }
+  })
+
+  test("the module follows the classroom's light or dark theme, the terminal stays dark", async () => {
+    const stu = await ready(student!)
+    // xterm draws in the colour of its theme option
+    const xterm = () => stu.evaluate(() => (window as any).term.getOption('theme').background)
+
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(student!, theme)
+      await expect.poll(() => moduleTheme(stu)).toBe(theme)
+      await expect.poll(() => moduleBackground(stu)).toBe(THEME_BACKGROUND[theme])
+      await expect.poll(xterm).toBe(theme === 'dark' ? '#14171c' : '#1b2029')
     }
   })
 })

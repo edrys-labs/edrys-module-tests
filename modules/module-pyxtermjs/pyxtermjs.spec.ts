@@ -1,6 +1,6 @@
 import { Browser, BrowserContext, Frame, expect, test } from '@playwright/test'
 import { Session, closeSessions, createClass, enterRoom, joinClass, openStation, setModules, stationRoom } from '../../lib/edrys'
-import { moduleUrl, serveModules } from '../../lib/modules'
+import { THEME_BACKGROUND, moduleBackground, moduleTheme, moduleUrl, serveModules, setClassroomTheme } from '../../lib/modules'
 import { installFakePyxterm, pty } from '../../lib/fake-pyxterm'
 import { terminalSize, terminalText } from '../../lib/xterm'
 import {
@@ -319,5 +319,18 @@ test.describe('module-pyxtermjs', () => {
     await pty(st).output('\x1b[?1049l')
     await expect.poll(async () => (await terminalSize(stu)).rows, { timeout: SYNC }).toBe(tall)
     expect((await pty(st).resizes()).at(-1)).toEqual(size)
+  })
+
+  test("the module follows the classroom's light or dark theme, the terminal stays dark", async ({ browser }) => {
+    const { stu } = await setup(browser, { server: SERVER })
+    // xterm draws in the colour of its theme option
+    const xterm = () => stu.evaluate(() => (window as any).term.options.theme.background)
+
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(student!, theme)
+      await expect.poll(() => moduleTheme(stu)).toBe(theme)
+      await expect.poll(() => moduleBackground(stu)).toBe(THEME_BACKGROUND[theme])
+      await expect.poll(xterm).toBe(theme === 'dark' ? '#14171c' : '#1b2029')
+    }
   })
 })

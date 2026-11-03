@@ -10,8 +10,9 @@ import { BASE_URL, Session } from './edrys'
  *
  *   http://e2e-module.test/<module-name>/...  ->  $EDRYS_MODULES/<module-name>/...
  *
- * The module's published edrys.js is swapped for the one of the edrys-Lite
- * under test, so module and host speak the same API version.
+ * The module's published edrys.js and edrys-module.css are swapped for the
+ * ones of the edrys-Lite under test, so module and host speak the same API
+ * version and share one look.
  */
 
 export const MODULE_ORIGIN = 'http://e2e-module.test'
@@ -23,6 +24,8 @@ export const SECURE_MODULE_ORIGIN = 'https://e2e-module.test'
 export const MODULES_DIR = resolve(process.env.EDRYS_MODULES || join(__dirname, '..', '..'))
 
 const PUBLISHED_EDRYS_JS = 'https://edrys-labs.github.io/module/edrys.js'
+const PUBLISHED_MODULE_CSS = 'https://edrys-labs.github.io/module/edrys-module.css'
+const PUBLISHED_FONTS = 'https://edrys-labs.github.io/module/vendor/fonts/**'
 
 const CONTENT_TYPES: Record<string, string> = {
   '.html': 'text/html',
@@ -60,7 +63,7 @@ async function fulfillFrom(route: Route, root: string, path: string) {
   })
 }
 
-/** Context hook: serve local modules and the local edrys.js. */
+/** Context hook: serve local modules and the local edrys.js, edrys-module.css and its fonts. */
 export async function serveModules(context: BrowserContext) {
   for (const origin of [MODULE_ORIGIN, SECURE_MODULE_ORIGIN]) {
     await context.route(`${origin}/**`, (route) =>
@@ -68,11 +71,45 @@ export async function serveModules(context: BrowserContext) {
     )
   }
 
-  await context.route(PUBLISHED_EDRYS_JS, async (route) => {
-    const response = await route.fetch({ url: `${BASE_URL}/module/edrys.js` })
-    await route.fulfill({ response })
-  })
+  for (const published of [PUBLISHED_EDRYS_JS, PUBLISHED_MODULE_CSS, PUBLISHED_FONTS]) {
+    await context.route(published, async (route) => {
+      const path = new URL(route.request().url()).pathname
+      const response = await route.fetch({ url: `${BASE_URL}${path}` })
+      await route.fulfill({ response })
+    })
+  }
 }
+
+/**
+ * Switch the classroom of this session to `theme`. Sessions pick no theme in the user menu, so
+ * edrys-Lite follows the system setting, which this emulates; edrys.js then passes the theme to
+ * every module (`<html data-theme>`, `Edrys.onTheme`).
+ */
+export async function setClassroomTheme(s: Session, theme: 'light' | 'dark') {
+  await s.page.emulateMedia({ colorScheme: theme })
+}
+
+/** The theme edrys.js has put on the module's `<html>` (undefined before the first update). */
+export const moduleTheme = (frame: Frame) =>
+  frame.evaluate(() => document.documentElement.dataset.theme).catch(() => undefined)
+
+/** The module page's background, as edrys-module.css sets it for the theme. */
+export const moduleBackground = (frame: Frame) =>
+  frame.evaluate(() => getComputedStyle(document.body).backgroundColor).catch(() => '')
+
+/**
+ * The code highlighting themes switched on in the module: modules that load a light and a dark
+ * stylesheet mark them `<link data-code-theme="light|dark">` and set the unused one's media to "not all".
+ */
+export const codeThemes = (frame: Frame) =>
+  frame.evaluate(() =>
+    Array.from(document.querySelectorAll<HTMLLinkElement>('link[data-code-theme]'))
+      .filter((link) => link.media === 'all')
+      .map((link) => link.dataset.codeTheme)
+  )
+
+/** --edrys-bg of edrys-module.css in each theme, as getComputedStyle reports it. */
+export const THEME_BACKGROUND = { light: 'rgb(255, 255, 255)', dark: 'rgb(32, 37, 45)' }
 
 /**
  * Context hook: answer a module's published URL from a folder of the local checkout.

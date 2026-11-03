@@ -9,7 +9,15 @@ import {
   openStation,
   setModules,
 } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, serveModules } from '../../lib/modules'
+import {
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 
 /**
  * module-monaco-editor in a real edrys-Lite: a teacher and a student in the
@@ -314,6 +322,21 @@ test.describe('module-monaco-editor', () => {
     await typeAtEnd(t1, ' edited')
     await expect.poll(() => code(s1), { timeout: SYNC }).toBe('// first edited')
     expect(await code(s2)).toBe('// second')
+  })
+
+  test("theme auto follows the classroom's light or dark theme", async ({ browser }) => {
+    await start(browser, withConfig({ value: CODE }))
+    const t = await ready(teacher!)
+    const editorBackground = () =>
+      t.locator('.monaco-editor .monaco-editor-background').first().evaluate((e) => getComputedStyle(e).backgroundColor)
+
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(teacher!, theme)
+      await expect.poll(() => moduleTheme(t)).toBe(theme)
+      await expect.poll(() => moduleBackground(t)).toBe(THEME_BACKGROUND[theme])
+      await expect.poll(editorBackground).toBe(THEME_BACKGROUND[theme])
+    }
+    expect(await code(t)).toBe(CODE)
   })
 
   test('a config saved with the settings form does what the teacher ticked', async ({ browser }) => {

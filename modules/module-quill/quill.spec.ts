@@ -1,6 +1,15 @@
 import { Browser, BrowserContext, Frame, expect, test } from '@playwright/test'
 import { ModuleEntry, Session, closeSessions, closeSideMenu, createClass, joinClass, setModules } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, revealModuleTop, serveModules } from '../../lib/modules'
+import {
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  revealModuleTop,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 
 /**
  * module-quill in a real edrys-Lite: a teacher and a student in the lobby
@@ -149,7 +158,7 @@ test.describe('module-quill', () => {
     await start(browser)
     for (const frame of [await ready(teacher!), await ready(student!)]) {
       await expect(frame.locator('#status')).toBeHidden()
-      await expect(frame.locator('.ql-toolbar .badge')).toHaveText('shared')
+      await expect(frame.locator('.ql-toolbar .edrys-pill')).toHaveText('shared')
       await expect(editor(frame)).toHaveClass(/ql-blank/)
       await expect(editor(frame)).toHaveAttribute('data-placeholder', 'Start collaborating...')
       await expect(editor(frame)).toHaveAttribute('contenteditable', 'true')
@@ -390,7 +399,7 @@ test.describe('module-quill', () => {
     const stu = await readyAt(student!, local)
 
     for (const frame of [t, stu]) {
-      await expect(frame.locator('.ql-toolbar .badge')).toHaveText('local only')
+      await expect(frame.locator('.ql-toolbar .edrys-pill')).toHaveText('local only')
       await expect(editor(frame)).toHaveAttribute('data-placeholder', 'Start writing...')
     }
 
@@ -478,16 +487,18 @@ test.describe('module-quill', () => {
     await expect.poll(overflow).toBeLessThanOrEqual(0)
   })
 
-  test('in dark mode the editor follows the dark theme', async ({ browser }) => {
+  test("the editor follows the classroom's light or dark theme", async ({ browser }) => {
     await start(browser)
-    await teacher!.page.emulateMedia({ colorScheme: 'dark' })
     const t = await ready(teacher!)
+    // toolbar icons in the theme's button text colour instead of Quill's #444
+    const icon = () => t.evaluate(() => getComputedStyle(document.querySelector('.ql-toolbar .ql-bold .ql-stroke')!).stroke)
 
-    // the vs-dark surface of module-monaco-editor, and toolbar icons in its bar text colour instead of Quill's #444
-    await expect.poll(() => t.evaluate(() => getComputedStyle(document.body).backgroundColor)).toBe('rgb(30, 30, 30)')
-    await expect
-      .poll(() => t.evaluate(() => getComputedStyle(document.querySelector('.ql-toolbar .ql-bold .ql-stroke')!).stroke))
-      .toBe('rgb(204, 204, 204)')
+    for (const [theme, text] of [['dark', 'rgb(238, 240, 243)'], ['light', 'rgb(27, 32, 41)']] as const) {
+      await setClassroomTheme(teacher!, theme)
+      await expect.poll(() => moduleTheme(t)).toBe(theme)
+      await expect.poll(() => moduleBackground(t)).toBe(THEME_BACKGROUND[theme])
+      await expect.poll(icon).toBe(text)
+    }
   })
 
   test('until the classroom is ready, the module says it is loading', async ({ browser }) => {

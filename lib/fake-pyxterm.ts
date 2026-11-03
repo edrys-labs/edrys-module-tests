@@ -5,9 +5,11 @@ import { BrowserContext, Frame } from '@playwright/test'
  * that talk to it through the Socket.IO client).
  *
  * The module loads the Socket.IO client from cdnjs and connects to the
- * server's `/pty` namespace. Instead of speaking Engine.IO, the client script
- * itself is replaced by a small fake `io` whose sockets talk to an in-page
- * server, like `navigator.serial` is replaced by fake-serial. Tests drive the
+ * server's `/pty` namespace. Instead of speaking Engine.IO, a small fake `io`
+ * whose sockets talk to an in-page server takes the client's place, like
+ * `navigator.serial` is replaced by fake-serial. The module checks the
+ * client's integrity hash, so the real script still loads; the fake holds
+ * `window.io` and the client's own assignment to it goes nowhere. Tests drive the
  * server inside the frame that holds the socket (the station):
  *
  *   await pty(frame).output('hello\r\n')   // the shell prints
@@ -23,8 +25,6 @@ import { BrowserContext, Frame } from '@playwright/test'
  * instead of with backoff; `pty(frame).retries()` counts them.
  */
 
-const SOCKET_IO_CLIENT = 'https://cdnjs.cloudflare.com/ajax/libs/socket.io/**'
-
 export interface FakePyxtermOptions {
   /** The server is reachable when the module first connects (default true). */
   up?: boolean
@@ -32,17 +32,10 @@ export interface FakePyxtermOptions {
   echo?: boolean
 }
 
-/** Context hook: serve the fake Socket.IO client to module iframes. */
+/** Context hook: give every frame the fake Socket.IO client. */
 export async function installFakePyxterm(context: BrowserContext, options: FakePyxtermOptions = {}) {
   const settings = { up: options.up ?? true, echo: options.echo ?? true }
-  await context.route(SOCKET_IO_CLIENT, (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: 'text/javascript',
-      headers: { 'Access-Control-Allow-Origin': '*' },
-      body: `(${fakeSocketIo.toString()})(${JSON.stringify(settings)});`,
-    })
-  )
+  await context.addInitScript(`(${fakeSocketIo.toString()})(${JSON.stringify(settings)});`)
 }
 
 // Runs in the page; must be self-contained.
@@ -149,7 +142,8 @@ function fakeSocketIo(settings: { up: boolean; echo: boolean }) {
 
   const io: any = (url: string, opts?: any) => new FakeSocket(url, opts)
   io.connect = io
-  ;(window as any).io = io
+  // the real client, loaded after this, assigns window.io: keep the fake
+  Object.defineProperty(window, 'io', { get: () => io, set: () => {}, configurable: true })
   ;(window as any).__fakePyxterm = control
 }
 

@@ -1,6 +1,6 @@
 import { Browser, BrowserContext, Frame, expect, test } from '@playwright/test'
 import { Session, closeSessions, closeSideMenu, createClass, enterRoom, inPeer, joinClass, setModules } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, serveModules } from '../../lib/modules'
+import { moduleFrame, moduleTheme, moduleUrl, serveModules, setClassroomTheme } from '../../lib/modules'
 
 /**
  * module-whiteboard in a real edrys-Lite: a teacher and students, in the lobby
@@ -268,5 +268,22 @@ test.describe('module-whiteboard', () => {
     expect(await shapes(teacher!)).toEqual([RECTANGLE])
     expect(await shapes(student)).toEqual([])
     expect(await sharedKeys(teacher!)).toEqual([])
+  })
+
+  test("the board follows the classroom's light or dark theme and keeps its drawing", async ({ browser }) => {
+    await addModule(teacher!)
+    const frame = await ready(teacher!)
+    await drawRectangle(teacher!)
+    const excalidrawTheme = () => frame.evaluate(() => (window as any).excalidrawAPI.getAppState().theme)
+    const badgeBackground = () => badge(frame).evaluate((e) => getComputedStyle(e).backgroundColor)
+
+    for (const [theme, pill] of [['dark', 'rgb(31, 65, 39)'], ['light', 'rgb(228, 248, 231)']] as const) {
+      await setClassroomTheme(teacher!, theme)
+      await expect.poll(() => moduleTheme(frame)).toBe(theme)
+      await expect.poll(excalidrawTheme).toBe(theme)
+      await expect(frame.locator('.excalidraw')).toHaveClass(theme === 'dark' ? /theme--dark/ : /^(?!.*theme--dark)/)
+      expect(await badgeBackground()).toBe(pill)
+    }
+    expect(await shapes(teacher!)).toEqual([RECTANGLE])
   })
 })

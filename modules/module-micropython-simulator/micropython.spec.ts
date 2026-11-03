@@ -1,6 +1,14 @@
 import { Browser, BrowserContext, Frame, expect, test } from '@playwright/test'
 import { ModuleEntry, Session, closeSessions, closeSideMenu, createClass, joinClass, setModules } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, serveModules } from '../../lib/modules'
+import {
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 
 /**
  * module-micropython-simulator in a real edrys-Lite: a teacher and a student
@@ -368,5 +376,18 @@ test.describe('module-micropython-simulator', () => {
     await expect(stdout(t)).toContainText('T 40', { timeout: SYNC })
     await expect(stdout(stu)).toContainText('T 21', { timeout: SYNC })
     await expect(sensor(stu, 'temperature').locator('input')).toHaveValue('21')
+  })
+
+  test("the module follows the classroom's light or dark theme, the terminal stays dark", async () => {
+    await setup(teacher!)
+    const t = await ready(teacher!)
+    const terminal = () => stdout(t).evaluate((e) => getComputedStyle(e).backgroundColor)
+
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(teacher!, theme)
+      await expect.poll(() => moduleTheme(t)).toBe(theme)
+      await expect.poll(() => moduleBackground(t)).toBe(THEME_BACKGROUND[theme])
+      expect(await terminal()).toBe(theme === 'dark' ? 'rgb(20, 23, 28)' : 'rgb(27, 32, 41)')
+    }
   })
 })

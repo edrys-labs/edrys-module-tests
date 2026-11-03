@@ -1,6 +1,15 @@
 import { Browser, BrowserContext, Frame, expect, test } from '@playwright/test'
 import { Session, closeSessions, createClass, joinClass, openStation, setModules } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, serveModules } from '../../lib/modules'
+import {
+  THEME_BACKGROUND,
+  codeThemes,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 
 /**
  * module-markdown-it in a real edrys-Lite: a teacher and a student in the
@@ -40,6 +49,14 @@ async function shownText(s: Session): Promise<string> {
     .innerText({ timeout: 5_000 })
     .catch(() => '')
 }
+
+/** The fill of the first Mermaid node, --edrys-code-bg of the theme it was drawn in. */
+const mermaidFill = (frame: Frame) =>
+  frame
+    .evaluate(() => getComputedStyle(document.querySelector('.mermaid svg .node rect')!).fill)
+    .catch(() => '')
+
+const MERMAID_FILL = { light: 'rgb(240, 241, 244)', dark: 'rgb(44, 51, 61)' }
 
 /** A student who opens the class link and stays in the lobby. */
 function addStudent(browser: Browser, classUrl: string) {
@@ -156,6 +173,40 @@ test.describe('module-markdown-it', () => {
     await expect(stu.locator('.mermaid svg').nth(1)).toContainText('run code')
     await expect(stu.locator('body')).not.toContainText('Syntax error')
   })
+
+  // index.html links the code themes itself, module.yaml adds them from its script
+  for (const entry of ['index.html', 'module.yaml']) {
+    test(`${entry}: code and diagrams follow the classroom's light or dark theme`, async ({ browser }) => {
+      const content = [
+        '# Themed',
+        '',
+        '```js',
+        'const answer = 42',
+        '```',
+        '',
+        '```mermaid',
+        'graph TD',
+        '  A[Start] --> B[Done]',
+        '```',
+      ].join('\n')
+      await setModules(teacher!, [{ url: moduleUrl(MODULE, entry), config: { content } }])
+      student = await addStudent(browser, classUrl)
+      const stu = await ready(student)
+      await expect(stu.locator('.mermaid svg')).toContainText('Start', { timeout: 10_000 })
+
+      for (const theme of ['dark', 'light'] as const) {
+        await setClassroomTheme(student, theme)
+        await expect.poll(() => moduleTheme(stu)).toBe(theme)
+        await expect.poll(() => moduleBackground(stu)).toBe(THEME_BACKGROUND[theme])
+        expect(await codeThemes(stu)).toEqual([theme])
+        // the diagram is drawn again in the theme's colours
+        await expect.poll(() => mermaidFill(stu)).toBe(MERMAID_FILL[theme])
+      }
+      // the content is drawn again, not lost
+      await expect(stu.getByRole('heading', { name: 'Themed' })).toBeVisible()
+      await expect(stu.locator('pre.hljs .hljs-keyword')).toHaveText('const')
+    })
+  }
 
   test('a student who joins later sees the content', async ({ browser }) => {
     await setModules(teacher!, [{ url: moduleUrl(MODULE, 'index.html'), config: { content: 'Task 1: read this' } }])

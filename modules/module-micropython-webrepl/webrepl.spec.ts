@@ -11,7 +11,16 @@ import {
   setModules,
   stationRoom,
 } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, revealModuleTop, serveModules } from '../../lib/modules'
+import {
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  revealModuleTop,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 import { FakeWebRepl } from '../../lib/fake-webrepl'
 import { terminalText } from '../../lib/xterm'
 
@@ -455,6 +464,18 @@ test.describe('module-micropython-webrepl', () => {
       await expect.poll(() => board.connections, { timeout: SYNC }).toBe(2)
       await expect(button(st)).toHaveText('Disconnect', { timeout: SYNC })
     })
+    test("the module follows the classroom's light or dark theme, the terminal stays dark", async () => {
+      const stu = await ready(student!)
+      // xterm draws in the colour of its theme option
+      const xterm = () => stu.evaluate(() => (window as any).term.options.theme.background)
+
+      for (const theme of ['dark', 'light'] as const) {
+        await setClassroomTheme(student!, theme)
+        await expect.poll(() => moduleTheme(stu)).toBe(theme)
+        await expect.poll(() => moduleBackground(stu)).toBe(THEME_BACKGROUND[theme])
+        await expect.poll(xterm).toBe(theme === 'dark' ? '#14171c' : '#1b2029')
+      }
+    })
   })
 
   test.describe('without a board address', () => {
@@ -542,9 +563,7 @@ test.describe('module-micropython-webrepl', () => {
       await st.getByRole('button', { name: 'Run Self Charge' }).click()
       await expect.poll(() => board.lines.filter((l) => l === selfCharge).length, { timeout: SYNC }).toBe(1)
 
-      // the student goes back to the lobby (enterRoom expects the side menu open)
-      await student!.page.locator('.v-app-bar-nav-icon').click()
-      await expect(student!.page.locator('.v-navigation-drawer--temporary').first()).toBeInViewport()
+      // the student goes back to the lobby
       await enterRoom(student!, 'Lobby')
       // the station checks for an empty room every 5 s
       await expect.poll(() => board.lines.filter((l) => l === selfCharge).length, { timeout: SYNC }).toBe(2)

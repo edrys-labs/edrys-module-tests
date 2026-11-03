@@ -3,7 +3,15 @@ import { readFileSync } from 'fs'
 import { join } from 'path'
 import { ModuleEntry, Session, closeSessions, closeSideMenu, createClass, joinClass, setModules } from '../../lib/edrys'
 import { FakeHexi, HexiResponse, installFakeHexi } from '../../lib/fake-hexi'
-import { moduleFrame, moduleUrl, serveModules } from '../../lib/modules'
+import {
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 
 /**
  * module-avr8js in a real edrys-Lite: a teacher and a student in the lobby
@@ -562,5 +570,23 @@ ${CIRCUIT}`,
       .poll(() => chart.evaluate((e: any) => e.shadowRoot.querySelector('canvas').height), { timeout: SYNC })
       .toBeGreaterThan(100)
     await expect(chart.locator('.legend')).toHaveText(/TCNT0\s*OCR0B/)
+  })
+
+  test("the module follows the classroom's light or dark theme, the terminal stays dark", async () => {
+    await setup(teacher!, { config: { modules: `<avr-chart signals='TCNT0'></avr-chart>\n${CIRCUIT}` } })
+    const t = await ready(teacher!)
+    const terminal = () => stdout(t).evaluate((e) => getComputedStyle(e).backgroundColor)
+    const chartAxis = () => t.locator('avr-chart').evaluate((e) => getComputedStyle(e).getPropertyValue('--chart-axis').trim())
+
+    const axes: string[] = []
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(teacher!, theme)
+      await expect.poll(() => moduleTheme(t)).toBe(theme)
+      await expect.poll(() => moduleBackground(t)).toBe(THEME_BACKGROUND[theme])
+      expect(await terminal()).toBe(theme === 'dark' ? 'rgb(20, 23, 28)' : 'rgb(27, 32, 41)')
+      axes.push(await chartAxis())
+    }
+    // the chart reads its colours on every frame, so they switch with the theme
+    expect(axes[0]).not.toBe(axes[1])
   })
 })

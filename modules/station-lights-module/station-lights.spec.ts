@@ -10,7 +10,15 @@ import {
   setModules,
   stationRoom,
 } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, serveModules } from '../../lib/modules'
+import {
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 import { FakeLightServer } from '../../lib/fake-lights'
 
 /**
@@ -123,6 +131,18 @@ test.describe('station-lights-module', () => {
     } finally {
       await closeSessions(second)
     }
+  })
+
+  test("the module follows the classroom's light or dark theme", async () => {
+    const st = await ready(station!)
+    await expect(light(st)).toHaveText('off')
+
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(station!, theme)
+      await expect.poll(() => moduleTheme(st)).toBe(theme)
+      await expect.poll(() => moduleBackground(st)).toBe(THEME_BACKGROUND[theme])
+    }
+    await expect(light(st)).toHaveText('off')
   })
 
   test("a student in another station does not switch this station's light on", async () => {

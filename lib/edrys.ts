@@ -128,19 +128,25 @@ export async function joinClass(browser: Browser, classUrl: string, prepare?: Pr
   return { context, page }
 }
 
+/** The app bar button that opens and closes the class's side menu. */
+export const roomsButton = (s: Session) => s.page.getByRole('button', { name: 'Rooms', exact: true })
+
 /**
- * Enter a room with its arrow button in the sidebar, once the room has shown up there,
+ * Enter a room with its row in the sidebar, once the room has shown up there,
  * then close the sidebar as a person would: it stays open and covers the room's modules.
  * Opens the sidebar first if it was closed (e.g. moving on from a room entered before).
  */
 export async function enterRoom(s: Session, room: string) {
   const drawer = s.page.locator('.v-navigation-drawer--temporary').first()
   if (!(await drawer.evaluate((d) => d.classList.contains('v-navigation-drawer--active')))) {
-    await s.page.locator('.v-app-bar-nav-icon').click()
+    await roomsButton(s).click()
     await expect(drawer).toBeInViewport()
   }
-  const entry = s.page.getByRole('listbox').filter({ hasText: room })
-  await entry.getByRole('button').first().click({ timeout: 45_000 })
+  // the whole row is one button; .room-name holds the room's name
+  const entry = s.page.locator('button.room-row').filter({
+    has: s.page.locator('.room-name').getByText(room, { exact: true }),
+  })
+  await entry.click({ timeout: 45_000 })
   await closeSideMenu(s)
 }
 
@@ -152,7 +158,7 @@ export async function enterRoom(s: Session, room: string) {
 export async function closeSideMenu(s: Session) {
   const drawer = s.page.locator('.v-navigation-drawer--temporary').first()
   if (await drawer.evaluate((d) => d.classList.contains('v-navigation-drawer--active'))) {
-    await s.page.locator('.v-app-bar-nav-icon').click()
+    await roomsButton(s).click()
   }
   // wait for the slide-out to finish, not just the class change
   await expect(drawer).not.toBeInViewport()

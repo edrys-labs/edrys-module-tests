@@ -2,7 +2,16 @@ import { Browser, BrowserContext, Frame, expect, test } from '@playwright/test'
 import { Session, closeSessions, closeSideMenu, createClass, joinClass, setModules } from '../../lib/edrys'
 import { readFileSync } from 'fs'
 import { join } from 'path'
-import { MODULES_DIR, moduleFrame, moduleUrl, serveModules } from '../../lib/modules'
+import {
+  MODULES_DIR,
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  serveModules,
+  setClassroomTheme,
+} from '../../lib/modules'
 
 /**
  * module-blockly-duino-v2 in a real edrys-Lite: a teacher and a student in
@@ -165,7 +174,7 @@ test.describe('module-blockly-duino-v2', () => {
       await expect.poll(() => code(frame)).toMatch(/void setup\(\) \{\s*\}\s*void loop\(\) \{\s*\}/)
       await expect(frame.locator('.blocklyBlockCanvas .blocklyDraggable')).toHaveCount(0)
       // no board is set, so the Arduino Uno's pins are used
-      await expect(frame.locator('#boardLabel')).toHaveText('· Arduino Uno')
+      await expect(frame.locator('#boardLabel')).toHaveText('Arduino Uno')
       // the toolbox offers the Arduino blocks
       await expect(frame.locator('.blocklyTreeLabel', { hasText: 'Arduino' }).first()).toBeVisible()
     }
@@ -207,7 +216,7 @@ test.describe('module-blockly-duino-v2', () => {
 
     stu = await reloadModule(student)
     await expect.poll(() => code(stu), { timeout: SYNC }).toContain('digitalWrite(50, HIGH);')
-    await expect(stu.locator('#boardLabel')).toHaveText('· Arduino Mega')
+    await expect(stu.locator('#boardLabel')).toHaveText('Arduino Mega')
     await expect(stu.locator('#edrysErrors')).toBeHidden()
 
     // Code.init finished, so the change listener is in place and writes to the room
@@ -430,7 +439,7 @@ test.describe('module-blockly-duino-v2', () => {
     const t = await ready(teacher!)
     const stu = await ready(student)
     await expect(stu.locator('#boardMenu')).toHaveValue('arduino_mega')
-    await expect(stu.locator('#boardLabel')).toHaveText('· Arduino Mega')
+    await expect(stu.locator('#boardLabel')).toHaveText('Arduino Mega')
     // the Mega's digital pins 0-53
     expect(await digitalPins(stu)).toEqual(Array.from({ length: 54 }, (_, i) => String(i)))
     await closeSideMenu(teacher!)
@@ -445,8 +454,8 @@ test.describe('module-blockly-duino-v2', () => {
     await expect(t.locator('#boardMenu')).toHaveValue('arduino_nano')
 
     await expect(stu.locator('#boardMenu')).toHaveValue('arduino_nano', { timeout: SYNC })
-    await expect(stu.locator('#boardLabel')).toHaveText('· Arduino Nano')
-    await expect(t.locator('#boardLabel')).toHaveText('· Arduino Nano')
+    await expect(stu.locator('#boardLabel')).toHaveText('Arduino Nano')
+    await expect(t.locator('#boardLabel')).toHaveText('Arduino Nano')
     // the blocks now offer the Nano's pins 0-13
     expect(await digitalPins(stu)).toEqual(Array.from({ length: 14 }, (_, i) => String(i)))
     // the blocks are reloaded for the new board, not duplicated
@@ -539,7 +548,7 @@ test.describe('module-blockly-duino-v2', () => {
     await t.locator('#boardButton').click()
     await t.locator('#boardDescriptionSelector').selectOption('arduino_uno')
     await t.locator('#boardListModalDialogOkay').click()
-    await expect(stu.locator('#boardLabel')).toHaveText('· Arduino Uno', { timeout: SYNC })
+    await expect(stu.locator('#boardLabel')).toHaveText('Arduino Uno', { timeout: SYNC })
 
     // modules served from the same origin share localStorage
     await t.evaluate(() => localStorage.setItem('another-module', 'keep me'))
@@ -551,7 +560,7 @@ test.describe('module-blockly-duino-v2', () => {
     for (const frame of [t, stu]) {
       await expect.poll(() => code(frame), { timeout: SYNC }).not.toContain('delay(2222);')
       expect(await code(frame)).toContain('delay(1111);')
-      await expect(frame.locator('#boardLabel')).toHaveText('· Arduino Mega', { timeout: SYNC })
+      await expect(frame.locator('#boardLabel')).toHaveText('Arduino Mega', { timeout: SYNC })
     }
     expect(await t.evaluate(() => localStorage.getItem('another-module'))).toBe('keep me')
   })
@@ -621,9 +630,30 @@ test.describe('module-blockly-duino-v2', () => {
       .poll(async () => (await moduleFrame(student!, MODULE)).locator('#boardLabel').textContent({ timeout: 1_000 }).catch(() => ''), {
         timeout: 60_000,
       })
-      .toBe('· Arduino Nano')
+      .toBe('Arduino Nano')
     stu = await ready(student)
     await expect(stu.locator('.blocklyTreeLabel', { hasText: 'Logik' }).first()).toBeVisible()
     await expect(stu.locator('#themeMenu')).toHaveValue('high_contrast')
+  })
+
+  test("the module follows the classroom's light or dark theme, blocks keep their block theme", async () => {
+    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(500) } }])
+    const t = await ready(teacher!)
+    const blockly = () =>
+      t.evaluate(() => {
+        const theme = (window as any).Code.workspace.getTheme()
+        return [theme.name, theme.getComponentStyle('workspaceBackgroundColour')]
+      })
+    const codeBackground = () => t.locator('#content_code').evaluate((e) => getComputedStyle(e).backgroundColor)
+
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(teacher!, theme)
+      await expect.poll(() => moduleTheme(t)).toBe(theme)
+      await expect.poll(() => moduleBackground(t)).toBe(THEME_BACKGROUND[theme])
+      await expect.poll(blockly).toEqual(['classic', theme === 'dark' ? '#20252d' : '#ffffff'])
+      expect(await codeBackground()).toBe(THEME_BACKGROUND[theme])
+    }
+    // switching keeps the program
+    await expect.poll(() => code(t)).toContain('delay(500);')
   })
 })

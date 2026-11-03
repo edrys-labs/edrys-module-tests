@@ -9,7 +9,16 @@ import {
   setModules,
   stationRoom,
 } from '../../lib/edrys'
-import { moduleFrame, moduleUrl, serveModules, servePublished } from '../../lib/modules'
+import {
+  THEME_BACKGROUND,
+  moduleBackground,
+  moduleFrame,
+  moduleTheme,
+  moduleUrl,
+  serveModules,
+  servePublished,
+  setClassroomTheme,
+} from '../../lib/modules'
 
 /**
  * module-liascript in a real edrys-Lite. The module embeds the hosted
@@ -194,6 +203,19 @@ test.describe('module-liascript', () => {
     for (const s of [teacher!, student]) {
       await expect(await message(s)).toHaveText(EMPTY, { timeout: SYNC })
       await expect((await moduleFrame(s, MODULE)).locator('#player')).toBeHidden()
+    }
+  })
+
+  test("the module's messages follow the classroom's light or dark theme", async ({ browser }) => {
+    await setModules(teacher!, [{ url: ENTRY }])
+    student = await addStudent(browser, classUrl)
+    await expect(await message(student)).toHaveText(EMPTY, { timeout: SYNC })
+    const frame = await moduleFrame(student, MODULE)
+
+    for (const theme of ['dark', 'light'] as const) {
+      await setClassroomTheme(student, theme)
+      await expect.poll(() => moduleTheme(frame)).toBe(theme)
+      await expect.poll(() => moduleBackground(frame)).toBe(THEME_BACKGROUND[theme])
     }
   })
 
