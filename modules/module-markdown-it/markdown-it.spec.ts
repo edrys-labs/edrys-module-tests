@@ -208,6 +208,37 @@ test.describe('module-markdown-it', () => {
     })
   }
 
+  for (const entry of ['index.html', 'module.yaml']) {
+    test(`${entry}: Arabic reads right to left, English and code left to right`, async ({ browser }) => {
+      const content = [
+        '# مرحبًا بكم',
+        '',
+        'هذه فقرة باللغة العربية.',
+        '',
+        '1. الخطوة الأولى',
+        '2. الخطوة الثانية',
+        '',
+        'An English paragraph next to it.',
+        '',
+        '```js',
+        'const answer = 42',
+        '```',
+      ].join('\n')
+      await setModules(teacher!, [{ url: moduleUrl(MODULE, entry), config: { content } }])
+      student = await addStudent(browser, classUrl)
+      const stu = await ready(student)
+
+      const direction = (selector: string) =>
+        stu.locator(selector).first().evaluate((el) => getComputedStyle(el).direction)
+      expect(await direction('h1')).toBe('rtl')
+      expect(await direction('p:has-text("هذه فقرة")')).toBe('rtl')
+      // the list's numbers go on the right too, not only its text
+      expect(await direction('ol')).toBe('rtl')
+      expect(await direction('p:has-text("An English paragraph")')).toBe('ltr')
+      expect(await direction('pre')).toBe('ltr')
+    })
+  }
+
   test('a student who joins later sees the content', async ({ browser }) => {
     await setModules(teacher!, [{ url: moduleUrl(MODULE, 'index.html'), config: { content: 'Task 1: read this' } }])
     await ready(teacher!)
