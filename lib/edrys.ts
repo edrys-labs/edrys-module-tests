@@ -60,6 +60,8 @@ export async function createClass(browser: Browser, prepare?: Prepare): Promise<
   const page = await context.newPage()
   await page.goto(BASE_URL)
   await page.getByText('Create a class').click()
+  // the dialog asks: an empty class or a ready-made lab
+  await page.getByRole('button', { name: 'Empty class', exact: true }).click()
   await appReady(page)
   return { teacher: { context, page }, classUrl: page.url().split('#')[0] }
 }

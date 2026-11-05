@@ -207,6 +207,35 @@ test.describe('module-blockly-duino-v2', () => {
     await expect(stu.locator('#edrysErrors')).toBeHidden()
   })
 
+  test('the trim block gives Arduino code: a helper that returns the trimmed text', async () => {
+    // Arduino's String::trim() returns nothing, so `x.trim()` as a value does not compile
+    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    const t = await ready(teacher!)
+
+    const generated = await t.evaluate(() => {
+      const w = window as any
+      const out: { [mode: string]: string } = {}
+      for (const mode of ['BOTH', 'LEFT', 'RIGHT']) {
+        const xml =
+          '<xml xmlns="https://developers.google.com/blockly/xml"><block type="board_serial_print" x="50" y="50">' +
+          `<value name="CONTENT"><block type="text_trim"><field name="MODE">${mode}</field>` +
+          '<value name="TEXT"><block type="board_serial_readStringUntil"><value name="CONTENT">' +
+          '<block type="text"><field name="TEXT">;</field></block></value></block></value></block></value></block></xml>'
+        w.Code.workspace.clear()
+        w.Blockly.Xml.domToWorkspace(w.Blockly.Xml.textToDom(xml), w.Code.workspace)
+        out[mode] = w.Blockly.Arduino.workspaceToCode(w.Code.workspace)
+      }
+      return out
+    })
+
+    for (const [mode, name] of [['BOTH', 'textTrim'], ['LEFT', 'textTrimLeft'], ['RIGHT', 'textTrimRight']]) {
+      expect(generated[mode]).toContain(`String ${name}(String text) {`)
+      expect(generated[mode]).toContain(`${name}(Serial.readStringUntil(';'))`)
+      expect(generated[mode]).not.toContain('.replace(')
+      expect(generated[mode]).not.toMatch(/\)\.trim\(\)/)
+    }
+  })
+
   test('a program with a pin block survives a module reload, and the module keeps writing changes', async ({ browser }) => {
     // pin 50 exists only on the Mega
     await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: digitalWriteXml(50), board: 'arduino_mega' } }])
