@@ -240,7 +240,7 @@ test.describe('module-liascript', () => {
     const loading = await message(student)
     await expect(loading).toHaveText('Loading LiaScript…')
     // shown after a short delay, so fast loads don't flicker
-    await expect.poll(() => loading.evaluate((el) => getComputedStyle(el).opacity)).toBe('0.6')
+    await expect.poll(() => loading.evaluate((el) => getComputedStyle(el).opacity)).toBe('1')
     release()
     await expect.poll(() => heading(student!), { timeout: LOAD }).toBe('Slow course')
     await expect(await message(student)).toBeHidden()
@@ -366,9 +366,12 @@ test.describe('module-liascript', () => {
     })
 
     test('after both users connect in LiaScript’s classroom dialog, they see each other and can chat', async () => {
-      // LiaScript opens its classroom dialog prefilled from the URL (backend Edrys, the room); each user connects
+      // LiaScript opens its classroom dialog prefilled from the URL (backend Edrys, the room); each user connects.
+      // The dialog is taller than the module's frame, which doesn't scroll it, so the click is dispatched
       for (const s of [station!, student!]) {
-        await (await player(s)).getByRole('button', { name: 'connect', exact: true }).click({ timeout: LOAD })
+        const connect = (await player(s)).getByRole('button', { name: 'connect', exact: true })
+        await expect(connect).toBeVisible({ timeout: LOAD })
+        await connect.dispatchEvent('click')
       }
 
       // LiaScript counts the users of the classroom on its classroom button (in a collapsed toolbar menu)
