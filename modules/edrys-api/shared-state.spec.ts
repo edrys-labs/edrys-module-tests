@@ -179,8 +179,9 @@ for (const transport of ['webrtc', 'ws'] as const) {
       await expect.poll(labels(a), { timeout: SYNC }).toEqual(['a student', 'b student', 'b teacher'])
 
       // the student is idle from here; leaving and re-entering the room remounts the teacher's frames
-      await inPeer(teacher!.page, "p.addRoom('Room 1'); return true")
-      await enterRoom(teacher!, 'Room 1')
+      // a named room: a numbered one ("Room N") only shows within the setup's defaultNumberOfRooms
+      await inPeer(teacher!.page, "p.addRoom('Group A'); return true")
+      await enterRoom(teacher!, 'Group A')
       await enterRoom(teacher!, 'Lobby')
       a = await ready(teacher!, 'a')
       const loaded = Date.now()
