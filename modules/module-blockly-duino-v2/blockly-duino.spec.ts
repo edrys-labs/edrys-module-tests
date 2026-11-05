@@ -236,6 +236,68 @@ test.describe('module-blockly-duino-v2', () => {
     }
   })
 
+  test('every Logic, Loops, Math, Text and Colour block gives Arduino code, not JavaScript', async () => {
+    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    const t = await ready(teacher!)
+
+    // each block as the toolbox offers it, alone and as the value of a print block
+    const generated: [string, string][] = await t.evaluate(() => {
+      const w = window as any
+      const out: [string, string][] = []
+      const categories = w.toolbox_standard.contents.filter((c: any) => ['LOGIC', 'LOOPS', 'MATH', 'TEXT', 'COLOUR'].includes(c.toolboxitemid))
+      for (const item of categories.flatMap((c: any) => c.contents || [])) {
+        if (item.kind !== 'block') continue
+        const xml = item.blockxml || `<block type="${item.type}"></block>`
+        const block = w.Blockly.Xml.domToBlock(w.Blockly.Xml.textToDom(xml), w.Code.workspace)
+        const name = block.type
+        const variants = [xml]
+        if (block.outputConnection) variants.push(`<block type="text_print"><value name="TEXT">${xml}</value></block>`)
+        block.dispose()
+        for (const variant of variants) {
+          w.Code.workspace.clear()
+          w.Blockly.Xml.domToWorkspace(w.Blockly.Xml.textToDom(`<xml xmlns="https://developers.google.com/blockly/xml">${variant}</xml>`), w.Code.workspace)
+          try {
+            out.push([name, w.Blockly.Arduino.workspaceToCode(w.Code.workspace)])
+          } catch (e: any) {
+            out.push([name, 'GENERATOR ERROR ' + e.message])
+          }
+        }
+      }
+      return out
+    })
+
+    expect(generated.length).toBeGreaterThan(50)
+    const javascript = /GENERATOR ERROR|\bfunction \w*\(|\bvar \w+|window\.|\.split\(|\.slice\(|\.join\(|parseFloat|\bnull\b|===|typeof /
+    const wrong = generated.filter(([, code]) => javascript.test(code)).map(([name, code]) => `${name}: ${code.match(javascript)![0]}`)
+    expect(wrong).toEqual([])
+
+    // a few blocks whose Arduino form is easy to get wrong
+    const all = generated.map(([, code]) => code).join('\n')
+    expect(all).toContain('long mathRandomInt(long a, long b) {')
+    expect(all).toContain('return random(a, b + 1);')
+    expect(all).toMatch(/Serial\.println\(/)
+    expect(all).toContain('Serial.begin(9600);')
+    expect(all).toMatch(/\b(round|ceil|floor)\(/)
+    expect(all).toContain('constrain(')
+  })
+
+  test('the toolbox has no Lists category and no blocks that need a list', async () => {
+    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    const t = await ready(teacher!)
+
+    const toolbox = await t.evaluate(() => {
+      const w = window as any
+      const items = w.Blockly.getMainWorkspace().getToolbox().getToolboxItems()
+      return {
+        categories: items.map((i: any) => i.id_),
+        blocks: JSON.stringify(items.map((i: any) => i.flyoutItems_ || i.toolboxItemDef_?.contents || [])),
+      }
+    })
+    expect(toolbox.categories).toContain('TEXT')
+    expect(toolbox.categories).not.toContain('LIST')
+    for (const type of ['lists_', 'controls_forEach', 'math_on_list']) expect(toolbox.blocks).not.toContain(type)
+  })
+
   test('a program with a pin block survives a module reload, and the module keeps writing changes', async ({ browser }) => {
     // pin 50 exists only on the Mega
     await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: digitalWriteXml(50), board: 'arduino_mega' } }])
