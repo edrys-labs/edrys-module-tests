@@ -97,8 +97,8 @@ test.describe('module-reference', () => {
     const stu = await ready(student!)
 
     // the header names role and room; Data is the first tab
-    await expect(t.locator('.status')).toContainText('teacher · Lobby')
-    await expect(stu.locator('.status')).toContainText('student · Lobby')
+    await expect(t.locator('header .label')).toHaveText('teacher · Lobby')
+    await expect(stu.locator('header .label')).toHaveText('student · Lobby')
     await expect(t.getByRole('tab', { name: 'Data' })).toHaveAttribute('aria-selected', 'true')
 
     await expect(field(t, 'Role')).toHaveText('teacher')
