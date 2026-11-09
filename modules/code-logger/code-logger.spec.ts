@@ -21,6 +21,7 @@ import {
   serveModules,
   setClassroomTheme,
 } from '../../lib/modules'
+import { setUsername } from '../../lib/edrys'
 
 /**
  * code-logger in a real edrys-Lite: a teacher and a student in the lobby
@@ -222,6 +223,22 @@ test.describe('code-logger', () => {
     const from = await displayNameOf(await sender(student!))
     await expect(entries(t).first()).toContainText(`From: ${from}`)
     await expect(entries(t).first()).toContainText('Date:')
+  })
+
+  test("a sender's chosen name is logged with the short ID", async ({ browser }) => {
+    await start(browser)
+    const t = await ready(teacher!)
+    const stu = await sender(student!)
+    await startMonitoring(t)
+    await setUsername(student!, 'Ada')
+    const id = await usernameOf(stu)
+    await expect
+      .poll(() => t.evaluate((id) => (window as any).Edrys.liveClass.users[id]?.username, id), { timeout: SYNC })
+      .toBe('Ada')
+
+    await send(stu, 'void loop() {}')
+    await expect(entries(t)).toHaveCount(1, { timeout: SYNC })
+    await expect(entries(t).first()).toContainText(`From: Ada · ${await displayNameOf(stu)}`)
   })
 
   test('only `execute` messages sent while monitoring are logged', async ({ browser }) => {

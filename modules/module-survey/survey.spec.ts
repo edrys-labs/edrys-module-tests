@@ -22,6 +22,7 @@ import {
   serveModules,
   setClassroomTheme,
 } from '../../lib/modules'
+import { setUsername } from '../../lib/edrys'
 
 /**
  * module-survey in a real edrys-Lite: a station and a student in the station's
@@ -321,6 +322,23 @@ test.describe('module-survey', () => {
     await expect(st.locator('.result-item')).toContainText(`From: ${name} (student)`)
 
     await expectSubmitted(await reloadModule(student!))
+  })
+
+  test("a student's chosen name is stored with the short ID", async () => {
+    const st = await ready(station!)
+    const stu = await ready(student!)
+    await setUsername(student!, 'Ada')
+    const id = await stu.evaluate(() => (window as any).Edrys.username as string)
+    await expect
+      .poll(() => st.evaluate((id) => (window as any).Edrys.liveClass.users[id]?.username, id), { timeout: 30_000 })
+      .toBe('Ada')
+
+    await takeSurvey(stu, { name: 'Ada', experience: 4, pace: 'ok' })
+    await expectSubmitted(stu)
+    await openResults(st)
+    await expectResults(st, 1)
+    const short = await stu.evaluate(() => (window as any).Edrys.liveUser.displayName)
+    await expect(st.locator('.result-item')).toContainText(`From: Ada · ${short} (student)`)
   })
 
   test('answers given at the station itself are stored too, and survive a reload', async () => {

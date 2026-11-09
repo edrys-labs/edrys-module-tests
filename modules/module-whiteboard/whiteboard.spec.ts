@@ -1,6 +1,7 @@
 import { Browser, BrowserContext, Frame, expect, test } from '@playwright/test'
 import { Session, closeSessions, closeSideMenu, createClass, enterRoom, inPeer, joinClass, setModules } from '../../lib/edrys'
 import { moduleFrame, moduleTheme, moduleUrl, serveModules, setClassroomTheme } from '../../lib/modules'
+import { setUsername } from '../../lib/edrys'
 
 /**
  * module-whiteboard in a real edrys-Lite: a teacher and students, in the lobby
@@ -240,6 +241,31 @@ test.describe('module-whiteboard', () => {
         { timeout: SYNC }
       )
       .toEqual([teacherName])
+  })
+
+  test("a pointer shows the peer's chosen name, also after a rename", async ({ browser }) => {
+    await addModule(teacher!)
+    student = await addStudent(browser, classUrl)
+    const frame = await ready(teacher!)
+    await ready(student)
+
+    await closeSideMenu(teacher!)
+    const box = (await frame.locator('canvas.interactive').boundingBox())!
+    await teacher!.page.mouse.move(box.x + 300, box.y + 200)
+    await teacher!.page.mouse.move(box.x + 310, box.y + 210)
+
+    await setUsername(teacher!, 'Müller')
+    await expect
+      .poll(
+        async () =>
+          (await ready(student!)).evaluate(() =>
+            [...(window as any).excalidrawAPI.getAppState().collaborators.values()]
+              .filter((c: any) => c.pointer)
+              .map((c: any) => c.username)
+          ),
+        { timeout: SYNC }
+      )
+      .toEqual(['Müller'])
   })
 
   test('without synchronize, each peer draws on a board of their own', async ({ browser }) => {

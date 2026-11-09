@@ -10,6 +10,7 @@ import {
   serveModules,
   setClassroomTheme,
 } from '../../lib/modules'
+import { setUsername } from '../../lib/edrys'
 
 /**
  * module-quill in a real edrys-Lite: a teacher and a student in the lobby
@@ -499,6 +500,23 @@ test.describe('module-quill', () => {
       await expect.poll(() => moduleBackground(t)).toBe(THEME_BACKGROUND[theme])
       await expect.poll(icon).toBe(text)
     }
+  })
+
+  test("a cursor shows the peer's chosen name, also after a rename, in the same colour", async ({ browser }) => {
+    await start(browser)
+    const t = await ready(teacher!)
+    const stu = await ready(student!)
+    await typeAtEnd(t, 'Hello')
+
+    const cursor = stu.locator('.ql-cursor')
+    await expect(cursor).toHaveCount(1, { timeout: SYNC })
+    const caret = () => cursor.locator('.ql-cursor-caret').evaluate((e) => getComputedStyle(e).backgroundColor)
+    const colour = await caret()
+
+    await setUsername(teacher!, 'Müller')
+    await expect(cursor.locator('.ql-cursor-name')).toHaveText('Müller', { timeout: SYNC })
+    await expect(cursor).toHaveCount(1)
+    expect(await caret()).toBe(colour)
   })
 
   test('until the classroom is ready, the module says it is loading', async ({ browser }) => {

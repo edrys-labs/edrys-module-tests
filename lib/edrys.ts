@@ -168,6 +168,11 @@ export async function closeSideMenu(s: Session) {
   await expect(s.page.locator('.v-navigation-drawer__scrim')).toHaveCount(0)
 }
 
+/** Sets the name the peer chose for itself, as the user menu does. */
+export function setUsername(s: Session, name: string) {
+  return inPeer(s.page, `p.setUsername(${JSON.stringify(name)})`)
+}
+
 export async function closeSessions(...sessions: (Session | undefined)[]) {
   for (const s of sessions) {
     if (s) await s.context.close().catch(() => {})

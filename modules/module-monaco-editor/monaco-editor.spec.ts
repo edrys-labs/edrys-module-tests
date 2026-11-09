@@ -18,6 +18,7 @@ import {
   serveModules,
   setClassroomTheme,
 } from '../../lib/modules'
+import { setUsername } from '../../lib/edrys'
 
 /**
  * module-monaco-editor in a real edrys-Lite: a teacher and a student in the
@@ -482,6 +483,26 @@ test.describe('module-monaco-editor', () => {
       } finally {
         await closeSessions(late)
       }
+    })
+
+    test("a caret shows the peer's chosen name, also after a rename, in the same colour", async ({ browser }) => {
+      await start(browser, withConfig(MULTI))
+      const t = await ready(teacher!)
+      const stu = await ready(student!)
+      await openTab(t, 'util.h')
+      await typeAtEnd(t, ' here')
+      await openTab(stu, 'util.h')
+      const caret = stu.locator('.yRemoteSelectionHead')
+      await expect(caret).toHaveCount(1, { timeout: SYNC })
+
+      const before = (property: string) =>
+        caret.evaluate((e, p) => getComputedStyle(e, '::before').getPropertyValue(p), property)
+      await expect.poll(() => before('content'), { timeout: SYNC }).toMatch(/^"[0-9a-f]{8}"$/)
+      const colour = await before('background-color')
+
+      await setUsername(teacher!, 'Müller "😀"')
+      await expect.poll(() => before('content'), { timeout: SYNC }).toBe('"Müller \\"😀\\""')
+      expect(await before('background-color')).toBe(colour)
     })
 
     test("a peer's caret shows only in the file it is in", async ({ browser }) => {

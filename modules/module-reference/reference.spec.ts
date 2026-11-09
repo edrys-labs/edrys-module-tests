@@ -1,6 +1,7 @@
 import { Browser, BrowserContext, Frame, Locator, expect, test } from '@playwright/test'
 import { Session, closeSessions, closeSideMenu, createClass, joinClass, openStation, setModules } from '../../lib/edrys'
 import { THEME_BACKGROUND, moduleBackground, moduleFrame, moduleTheme, moduleUrl, serveModules, setClassroomTheme } from '../../lib/modules'
+import { setUsername } from '../../lib/edrys'
 
 /**
  * module-reference in a real edrys-Lite: a teacher and students in the lobby
@@ -148,6 +149,17 @@ test.describe('module-reference', () => {
     const teacherEntry = stu.locator('details.user', { hasText: teacherName })
     await expect(teacherEntry).toHaveCount(1, { timeout: SYNC })
     await expect(teacherEntry.locator('summary .role')).toHaveText('Teacher')
+  })
+
+  test('a chosen name is shown beside the short ID', async () => {
+    const t = await ready(teacher!)
+    const stu = await ready(student!)
+    await expect(stu.locator('#chosen-name')).toHaveText('none')
+    const short = await stu.evaluate(() => (window as any).Edrys.liveUser.displayName)
+
+    await setUsername(student!, 'Ada')
+    await expect(stu.locator('#chosen-name')).toHaveText('Ada', { timeout: SYNC })
+    await expect(t.locator('details.user', { hasText: `Ada · ${short}` })).toHaveCount(1, { timeout: SYNC })
   })
 
   test('a message sent to all reaches the other peer with its subject and body', async () => {
