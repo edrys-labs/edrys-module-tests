@@ -120,7 +120,8 @@ test.describe('module-station-flasher', () => {
     await connect(st)
     await expect(badge(stu)).toHaveText('Running · Arduino Uno · 9600 baud', { timeout: SYNC })
     // junk before the bootloader's first answer must not break the upload
-    await arduino(st).set({ junk: [0x00, 0xfe, 0x33] })
+    // and answers take as long as on a real board, so the flash is long enough to watch
+    await arduino(st).set({ junk: [0x00, 0xfe, 0x33], answerDelay: 15 })
 
     s.server.queued(2)
     await upload(stu, BLINK)
@@ -147,6 +148,8 @@ test.describe('module-station-flasher', () => {
     await expect.poll(() => text(stu), { timeout: SYNC }).toContain('program started')
     // the monitor is back at the configured baud
     expect(await arduino(st).baudRate()).toBe(9600)
+    // opening the port reset the board; print once the program runs again
+    await expect.poll(() => arduino(st).mode(), { timeout: SYNC }).toBe('program')
     await arduino(st).print('e2e:blink\n')
     await expect.poll(() => text(stu), { timeout: SYNC }).toContain('e2e:blink')
 

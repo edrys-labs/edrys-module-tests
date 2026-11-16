@@ -48,6 +48,8 @@ function fakeArduino({ moduleOrigin, options }: { moduleOrigin: string; options:
     junk: [] as number[],
     /** The bootloader never answers (a board without one, or a wrong baud). */
     dead: false,
+    /** Milliseconds before the device's bytes arrive (USB latency, writing a page). */
+    answerDelay: 1,
     flash: new Uint8Array(32768).fill(0xff),
     flashEnd: 0,
     resets: 0,
@@ -102,7 +104,7 @@ function fakeArduino({ moduleOrigin, options }: { moduleOrigin: string; options:
 
     private send(bytes: number[] | Uint8Array) {
       const chunk = Uint8Array.from(bytes)
-      setTimeout(() => this.controller?.enqueue(chunk), 1)
+      setTimeout(() => this.controller?.enqueue(chunk), board.answerDelay)
     }
 
     print(text: string) {
@@ -248,7 +250,14 @@ export function arduino(frame: Frame) {
     baudRate: () => run<number | null>((c) => c.port.baudRate),
     isOpen: () => run<boolean>((c) => !!c.port.readable),
     mode: () => run<string>((c) => c.board.mode),
-    set: (changes: { junk?: number[]; dead?: boolean; signature?: number[]; bootText?: string; bootBaud?: number }) =>
+    set: (changes: {
+      junk?: number[]
+      dead?: boolean
+      signature?: number[]
+      bootText?: string
+      bootBaud?: number
+      answerDelay?: number
+    }) =>
       run((c, ch) => Object.assign(c.board, ch), changes),
     unplug: () => run((c) => c.port.unplug()),
     cancelNextRequest: () => run((c) => (c.cancelNextRequest = true)),
