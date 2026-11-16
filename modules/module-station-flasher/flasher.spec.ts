@@ -12,7 +12,8 @@ import {
   setClassroomTheme,
 } from '../../lib/modules'
 import { FakeArduinoOptions, arduino, installFakeArduino } from '../../lib/fake-arduino'
-import { FakeCompileServer, installFakeCompileServer } from '../../lib/fake-compile-server'
+import { Esp32Artifact, FakeCompileServer, installFakeCompileServer } from '../../lib/fake-compile-server'
+import { FakeEsp32Options, esp32, installFakeEsp32 } from '../../lib/fake-esp32'
 
 /**
  * module-station-flasher in a real edrys-Lite: students send code (as the
@@ -29,6 +30,33 @@ const MEGA_HEX = readFileSync(join(__dirname, 'fixtures', 'mega-152k.hex'), 'utf
 const MEGA = readFileSync(join(__dirname, 'fixtures', 'mega-152k.ino'), 'utf8')
 const MEGA_USB = { usbVendorId: 0x2341, usbProductId: 0x0010 }
 const BLINK = '// e2e:blink\nvoid setup(){Serial.begin(9600);pinMode(13,OUTPUT);}\nvoid loop(){Serial.println("e2e:blink");digitalWrite(13,!digitalRead(13));delay(500);}\n'
+
+// ESP32 results as worker-esp32 sends them, with short images
+const ESP_CODE = '// e2e:esp32\nvoid setup(){Serial.begin(115200);}\nvoid loop(){Serial.println("hi");delay(1000);}\n'
+const image = (name: string, offset: number, bytes: number[]) => ({ name, offset, data: Buffer.from(bytes).toString('base64') })
+const CLASSIC_ART: Esp32Artifact = {
+  type: 'esp32',
+  chip: 'esp32',
+  images: [
+    image('bootloader', 0x1000, [0xe9, 0x03, 0x02, 0x20]),
+    image('partitions', 0x8000, [0xaa, 0x50, 0x01, 0x02]),
+    image('boot_app0', 0xe000, [0xff, 0xff, 0x00, 0x00]),
+    image('app', 0x10000, [0xe9, 0x06, 0x02, 0x20, 0x11, 0x22]),
+  ],
+}
+const NANO_ART: Esp32Artifact = {
+  type: 'esp32',
+  chip: 'esp32s3',
+  images: [
+    image('bootloader', 0x0, [0xe9, 0x03, 0x02, 0x4f]),
+    image('partitions', 0x8000, [0xaa, 0x50, 0x01, 0x02]),
+    image('boot_app0', 0xe000, [0xff, 0xff, 0x00, 0x00]),
+    image('nora_recovery', 0xf70000, [0xe9, 0x05, 0x02, 0x4f]),
+    image('app', 0x10000, [0xe9, 0x06, 0x02, 0x4f, 0x33, 0x44]),
+  ],
+}
+const flashedMap = (art: Esp32Artifact) =>
+  Object.fromEntries(art.images.map((i) => [String(i.offset), Buffer.from(i.data, 'base64').toString('hex')]))
 
 /** Intel HEX -> the program as a hex string from address 0 (gaps 0xff, even length). */
 function programHex(hex: string) {
@@ -88,15 +116,17 @@ async function setup(
   {
     stationConfig = {},
     board = {},
+    esp,
     serverBase,
-  }: { stationConfig?: object; board?: FakeArduinoOptions; serverBase?: string } = {},
+  }: { stationConfig?: object; board?: FakeArduinoOptions; esp?: FakeEsp32Options; serverBase?: string } = {},
   studentCount = 1
 ): Promise<Setup> {
   const server = new FakeCompileServer().done('// e2e:blink', BLINK_HEX)
   // the station runs in the teacher's browser, so the fakes go there
   const prepareTeacher = async (context: BrowserContext) => {
     await serveModules(context)
-    await installFakeArduino(context, { bootText: 'program started\n', ...board })
+    if (esp) await installFakeEsp32(context, esp)
+    else await installFakeArduino(context, { bootText: 'program started\n', ...board })
     await installFakeCompileServer(context, server, serverBase)
   }
   const { teacher, classUrl } = await createClass(browser, prepareTeacher)
@@ -291,12 +321,12 @@ test.describe('module-station-flasher', () => {
     s = await setup(browser)
     const st = await ready(s.station)
     const stu = await ready(s.students[0])
-    // an Arduino Nano ESP32, as on an Arduino Alvik
-    await arduino(st).set({ usbVendorId: 0x2341, usbProductId: 0x0070 })
+    // an Arduino Leonardo (re-enumerates into its bootloader: not supported yet)
+    await arduino(st).set({ usbVendorId: 0x2341, usbProductId: 0x8036 })
     await connect(st)
 
-    await expect(badge(stu)).toHaveText("Running · Arduino Nano ESP32 (can't be flashed) · 9600 baud", { timeout: SYNC })
-    await expect.poll(() => text(stu), { timeout: SYNC }).toContain("the board at the station (Arduino Nano ESP32) can't be flashed")
+    await expect(badge(stu)).toHaveText("Running · Arduino Leonardo (can't be flashed) · 9600 baud", { timeout: SYNC })
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain("the board at the station (Arduino Leonardo) can't be flashed")
 
     await upload(stu, BLINK)
     await expect.poll(() => text(stu), { timeout: SYNC }).toContain("code was not uploaded.")
@@ -304,8 +334,113 @@ test.describe('module-station-flasher', () => {
     expect(await arduino(st).uploads()).toBe(0)
 
     await expect.poll(() => arduino(st).mode(), { timeout: SYNC }).toBe('program')
-    await arduino(st).print('esp32 says hi\n')
+    await arduino(st).print('leonardo says hi\n')
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('leonardo says hi')
+  })
+
+  // ---- ESP32 (fake board + fake esptool-js, lib/fake-esp32.ts) --------------
+
+  test('a classic ESP32 devkit is flashed with esptool-js and runs the program', async ({ browser }) => {
+    // no baud set: ESP32 boards default to 115200
+    s = await setup(browser, { stationConfig: { board: 'ESP32 (classic devkit)' }, esp: { kind: 'classic' } })
+    s.server.esp32('// e2e:esp32', CLASSIC_ART)
+    const st = await ready(s.station)
+    const stu = await ready(s.students[0])
+    await connect(st)
+    await expect(badge(stu)).toHaveText('Running · ESP32 (classic devkit) · 115200 baud', { timeout: SYNC })
+
+    await upload(stu, ESP_CODE)
+    await expect(badge(stu)).toHaveText(/Flashing your code · \d+ %/, { timeout: SYNC })
+    await expect(badge(stu)).toHaveText('Running · ESP32 (classic devkit) · 115200 baud', { timeout: 30_000 })
+    expect(s.server.requests[0].fqbn).toBe('esp32:esp32:esp32')
+    // every image at its address; the board started it (the module's own reset)
+    expect(await esp32(st).flashed()).toEqual(flashedMap(CLASSIC_ART))
+    expect(await esp32(st).state()).toMatchObject({ mode: 'program', uploads: 1, openPort: 'uart' })
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain("uploaded")
+
+    // the monitor is back and the board isn't held in reset
+    await esp32(st).print('esp32 says hi\n')
     await expect.poll(() => text(stu), { timeout: SYNC }).toContain('esp32 says hi')
+  })
+
+  test('a Nano ESP32: the station allows its bootloader port once, then uploads switch to it and back', async ({ browser }) => {
+    s = await setup(browser, { stationConfig: { board: 'Arduino Nano ESP32', baud: 115200 }, esp: { kind: 'nano' } })
+    s.server.esp32('// e2e:esp32', NANO_ART)
+    const st = await ready(s.station)
+    const stu = await ready(s.students[0])
+    await connect(st)
+    await expect(badge(stu)).toHaveText('Running · Arduino Nano ESP32 · 115200 baud', { timeout: SYNC })
+    await expect(st.locator('#allow-rom-btn')).toBeVisible()
+
+    // before that click, uploads are refused without compiling
+    await upload(stu, ESP_CODE)
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('click "Allow bootloader port" at the station once')
+    expect(s.server.requests).toHaveLength(0)
+
+    await st.locator('#allow-rom-btn').click()
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('bootloader port allowed')
+    await expect(st.locator('#allow-rom-btn')).toBeHidden()
+    // the board runs its sketch again (force-download flag cleared) and the monitor is open on it
+    await expect.poll(() => esp32(st).state(), { timeout: SYNC }).toMatchObject({
+      mode: 'program',
+      forceDownload: false,
+      openPort: 'sketch',
+    })
+
+    await upload(stu, ESP_CODE)
+    await expect(badge(stu)).toHaveText(/Flashing your code · \d+ %/, { timeout: SYNC })
+    await expect(badge(stu)).toHaveText('Running · Arduino Nano ESP32 · 115200 baud', { timeout: 30_000 })
+    expect(s.server.requests[0].fqbn).toBe('esp32:esp32:nano_nora')
+    expect(await esp32(st).flashed()).toEqual(flashedMap(NANO_ART))
+    expect(await esp32(st).state()).toMatchObject({ mode: 'program', uploads: 1, forceDownload: false, openPort: 'sketch' })
+
+    // native USB: the sketch's output only flows because the monitor raised DTR
+    await esp32(st).print('nano says hi\n')
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('nano says hi')
+
+    // the next upload needs no click at the station
+    const requests = (await esp32(st).state()).requests
+    await upload(stu, ESP_CODE + '// again\n')
+    await expect.poll(async () => (await esp32(st).state()).uploads, { timeout: 30_000 }).toBe(2)
+    expect((await esp32(st).state()).requests).toBe(requests)
+    await expect(badge(stu)).toHaveText('Running · Arduino Nano ESP32 · 115200 baud', { timeout: SYNC })
+  })
+
+  test('an ESP32 program is not written to a board with another chip', async ({ browser }) => {
+    // the class says classic ESP32, the station has an ESP32-S3 devkit
+    s = await setup(browser, {
+      stationConfig: { board: 'ESP32 (classic devkit)' },
+      esp: { kind: 'classic', chip: 'ESP32-S3 (QFN56) (revision v0.2)' },
+    })
+    s.server.esp32('// e2e:esp32', CLASSIC_ART)
+    const st = await ready(s.station)
+    const stu = await ready(s.students[0])
+    await connect(st)
+
+    await upload(stu, ESP_CODE)
+    await expect(badge(stu)).toHaveText('Flashing failed', { timeout: 30_000 })
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('the board is an ESP32-S3 (QFN56) (revision v0.2), the program is for an esp32')
+    expect(await esp32(st).flashed()).toEqual({})
+    // the monitor is open again
+    await expect.poll(async () => (await esp32(st).state()).openPort, { timeout: SYNC }).toBe('uart')
+  })
+
+  test('a Nano ESP32 still running MicroPython: the room is told to double-tap reset', async ({ browser }) => {
+    s = await setup(browser, { stationConfig: { board: 'Arduino Nano ESP32' }, esp: { kind: 'nano' } })
+    s.server.esp32('// e2e:esp32', NANO_ART)
+    const st = await ready(s.station)
+    const stu = await ready(s.students[0])
+    await connect(st)
+    await st.locator('#allow-rom-btn').click()
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('bootloader port allowed')
+
+    // MicroPython ignores the 1200-baud open
+    await esp32(st).set({ firmware: 'micropython' })
+    await upload(stu, ESP_CODE)
+    await expect(badge(stu)).toHaveText('Flashing failed', { timeout: 30_000 })
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('double-tap its reset button')
+    expect(await esp32(st).state()).toMatchObject({ mode: 'program', uploads: 0 })
+    await expect.poll(async () => (await esp32(st).state()).openPort, { timeout: SYNC }).toBe('sketch')
   })
 
   test('without a board or a reachable server, the room is told what to do', async ({ browser }) => {

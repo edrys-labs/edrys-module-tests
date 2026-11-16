@@ -2,7 +2,8 @@ import { BrowserContext } from '@playwright/test'
 
 /**
  * A fake of edrys-compile-server's job API (POST /compile, GET /jobs/:id),
- * which station flasher modules use to turn students' code into a hex file.
+ * which station flasher modules use to turn students' code into a hex file
+ * (AVR) or flash images (ESP32, `server.esp32(marker, artifact)`).
  *
  *   const server = await installFakeCompileServer(context)
  *   server.done('// e2e:blink', hexText)        // code containing the marker compiles
@@ -24,7 +25,10 @@ export interface CompileRequest {
   headers: Record<string, string>
 }
 
-type Result = { status: 'done'; log: string; artifact: { type: 'hex'; data: string } } | { status: 'error'; log: string }
+export type Esp32Artifact = { type: 'esp32'; chip: string; images: { name: string; offset: number; data: string }[] }
+type Result =
+  | { status: 'done'; log: string; artifact: { type: 'hex'; data: string } | Esp32Artifact }
+  | { status: 'error'; log: string }
 
 export class FakeCompileServer {
   readonly requests: CompileRequest[] = []
@@ -35,6 +39,12 @@ export class FakeCompileServer {
 
   done(marker: string, hex: string, log = 'Sketch uses 2002 bytes (6%) of program storage space.\n') {
     this.results.push({ marker, result: { status: 'done', log, artifact: { type: 'hex', data: hex } } })
+    return this
+  }
+
+  /** ESP32 boards: flash images with their addresses, as edrys-compile-server's worker-esp32 sends them */
+  esp32(marker: string, artifact: Esp32Artifact, log = 'Sketch uses 269040 bytes (20%) of program storage space.\n') {
+    this.results.push({ marker, result: { status: 'done', log, artifact } })
     return this
   }
 
