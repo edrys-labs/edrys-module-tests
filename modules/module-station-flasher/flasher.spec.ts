@@ -457,6 +457,11 @@ test.describe('module-station-flasher', () => {
     const st = await ready(s.station)
     const stu = await ready(s.students[0])
 
+    // the station checks the server when it opens, before any upload; only the station sees it
+    await expect.poll(() => text(st), { timeout: SYNC }).toContain('Compile server reachable at http://localhost:8080')
+    expect(s.server.healthChecks).toBe(1)
+    expect(await text(stu)).not.toContain('Compile server reachable')
+
     // no board yet: nothing is sent to the server
     await upload(stu, BLINK)
     await expect.poll(() => text(stu), { timeout: SYNC }).toContain('no board connected at the station')
@@ -474,6 +479,11 @@ test.describe('module-station-flasher', () => {
     await expect(st.locator('#server')).toHaveAttribute('placeholder', 'http://localhost:8080')
     await st.locator('#server').fill('http://down.e2e.test/')
     await st.locator('#server').press('Tab')
+    // the new address is checked at once, in Settings and the station's terminal
+    await expect(st.locator('#server-check')).toHaveText(/^Compile server not reachable at http:\/\/down\.e2e\.test\./, {
+      timeout: SYNC,
+    })
+    await expect.poll(() => text(st), { timeout: SYNC }).toContain('Compile server not reachable at http://down.e2e.test')
     await upload(stu, BLINK + '// again\n')
     await expect.poll(() => text(stu), { timeout: SYNC }).toContain('compile server not reachable at http://down.e2e.test')
 

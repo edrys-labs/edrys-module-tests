@@ -1,7 +1,7 @@
 import { BrowserContext } from '@playwright/test'
 
 /**
- * A fake of edrys-compile-server's job API (POST /compile, GET /jobs/:id),
+ * A fake of edrys-compile-server's job API (POST /compile, GET /jobs/:id, GET /health),
  * which station flasher modules use to turn students' code into a hex file
  * (AVR) or flash images (ESP32, `server.esp32(marker, artifact)`).
  *
@@ -32,6 +32,8 @@ type Result =
 
 export class FakeCompileServer {
   readonly requests: CompileRequest[] = []
+  /** GET /health requests answered */
+  healthChecks = 0
   private results: { marker: string; result: Result }[] = []
   private jobs = new Map<string, { result: Result; polls: number }>()
   private queuePolls = 0
@@ -121,6 +123,10 @@ export async function installFakeCompileServer(
       const id = server.submit({ fqbn: body.fqbn, files: body.files || [], main: body.main, headers: request.headers() })
       if (!id) return route.abort('internetdisconnected')
       return json(202, { jobId: id })
+    }
+    if (request.method() === 'GET' && path === '/health') {
+      server.healthChecks++
+      return json(200, { ok: true, queued: 0, running: 0 })
     }
     const match = path.match(/^\/jobs\/([0-9a-f]+)$/)
     if (request.method() === 'GET' && match) {
