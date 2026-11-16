@@ -122,6 +122,7 @@ test.describe('module-pyxtermjs units', () => {
       'arduino-stm32',
       'avr-gcc',
       'micropython',
+      'calliope-mini-v2',
       'native',
     ])
     for (const workflow of names) {
