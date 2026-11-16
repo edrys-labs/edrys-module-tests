@@ -227,6 +227,29 @@ test.describe('module-station-flasher', () => {
     expect(await arduino(st).isOpen()).toBe(true)
   })
 
+  test("a board the flasher can't flash is named, its code isn't compiled, the monitor still works", async ({
+    browser,
+  }) => {
+    s = await setup(browser)
+    const st = await ready(s.station)
+    const stu = await ready(s.students[0])
+    // an Arduino Nano ESP32, as on an Arduino Alvik
+    await arduino(st).set({ usbVendorId: 0x2341, usbProductId: 0x0070 })
+    await connect(st)
+
+    await expect(badge(stu)).toHaveText("Running · Arduino Nano ESP32 (can't be flashed) · 9600 baud", { timeout: SYNC })
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain("the board at the station (Arduino Nano ESP32) can't be flashed")
+
+    await upload(stu, BLINK)
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain("code was not uploaded.")
+    expect(s.server.requests).toHaveLength(0)
+    expect(await arduino(st).uploads()).toBe(0)
+
+    await expect.poll(() => arduino(st).mode(), { timeout: SYNC }).toBe('program')
+    await arduino(st).print('esp32 says hi\n')
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('esp32 says hi')
+  })
+
   test('without a board or a reachable server, the room is told what to do', async ({ browser }) => {
     s = await setup(browser)
     const st = await ready(s.station)

@@ -50,6 +50,9 @@ function fakeArduino({ moduleOrigin, options }: { moduleOrigin: string; options:
     dead: false,
     /** Milliseconds before the device's bytes arrive (USB latency, writing a page). */
     answerDelay: 1,
+    /** USB id the port reports (an Uno R3 by default). */
+    usbVendorId: 0x2341,
+    usbProductId: 0x0043,
     flash: new Uint8Array(32768).fill(0xff),
     flashEnd: 0,
     resets: 0,
@@ -99,7 +102,7 @@ function fakeArduino({ moduleOrigin, options }: { moduleOrigin: string; options:
     }
 
     getInfo() {
-      return { usbVendorId: 0x2341, usbProductId: 0x0043 }
+      return { usbVendorId: board.usbVendorId, usbProductId: board.usbProductId }
     }
 
     private send(bytes: number[] | Uint8Array) {
@@ -257,6 +260,8 @@ export function arduino(frame: Frame) {
       bootText?: string
       bootBaud?: number
       answerDelay?: number
+      usbVendorId?: number
+      usbProductId?: number
     }) =>
       run((c, ch) => Object.assign(c.board, ch), changes),
     unplug: () => run((c) => c.port.unplug()),
