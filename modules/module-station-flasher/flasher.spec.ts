@@ -14,6 +14,7 @@ import {
 import { FakeArduinoOptions, arduino, installFakeArduino } from '../../lib/fake-arduino'
 import { Esp32Artifact, FakeCompileServer, installFakeCompileServer } from '../../lib/fake-compile-server'
 import { FakeEsp32Options, esp32, installFakeEsp32 } from '../../lib/fake-esp32'
+import { FakeMicroPythonOptions, installFakeMicroPython, micropython } from '../../lib/fake-micropython'
 
 /**
  * module-station-flasher in a real edrys-Lite: students send code (as the
@@ -117,8 +118,15 @@ async function setup(
     stationConfig = {},
     board = {},
     esp,
+    mp,
     serverBase,
-  }: { stationConfig?: object; board?: FakeArduinoOptions; esp?: FakeEsp32Options; serverBase?: string } = {},
+  }: {
+    stationConfig?: object
+    board?: FakeArduinoOptions
+    esp?: FakeEsp32Options
+    mp?: FakeMicroPythonOptions
+    serverBase?: string
+  } = {},
   studentCount = 1
 ): Promise<Setup> {
   const server = new FakeCompileServer().done('// e2e:blink', BLINK_HEX)
@@ -126,6 +134,7 @@ async function setup(
   const prepareTeacher = async (context: BrowserContext) => {
     await serveModules(context)
     if (esp) await installFakeEsp32(context, esp)
+    else if (mp) await installFakeMicroPython(context, mp)
     else await installFakeArduino(context, { bootText: 'program started\n', ...board })
     await installFakeCompileServer(context, server, serverBase)
   }
@@ -473,6 +482,89 @@ test.describe('module-station-flasher', () => {
     s.students.push(late)
     await enterRoom(late, await stationRoom(s.station))
     await expect(badge(await ready(late))).toHaveText('Compile server problem', { timeout: SYNC })
+  })
+
+  test('a Calliope mini with MicroPython: the code goes over in small pieces and runs, no compile server', async ({ browser }) => {
+    s = await setup(browser, { stationConfig: { board: 'Calliope mini 1.x/2.x (MicroPython)' }, mp: {} })
+    const st = await ready(s.station)
+    const stu = await ready(s.students[0])
+    await connect(st)
+    await expect(badge(stu)).toHaveText('Running · Calliope mini 1.x/2.x (MicroPython) · 115200 baud', { timeout: SYNC })
+    expect(await micropython(st).signals()).toEqual({ dataTerminalReady: true, requestToSend: true })
+    // answers as slowly as a real board, so the upload is long enough to watch
+    await micropython(st).set({ answerDelay: 20 })
+
+    // longer than the Calliope takes in one command (the fake fails above
+    // 1500 characters, as the real one does with MemoryError); quotes,
+    // backslashes and non-ASCII must arrive unchanged
+    let code = "#>hello from the board\n# quotes ' \" and \\ and ü\n"
+    for (let i = 0; i < 40; i++) code += `def f${i}(): return ${i}  # padding, padding\n`
+    expect(code.length).toBeGreaterThan(1500)
+    await upload(stu, code)
+    await expect(badge(st)).toHaveText(/^Uploading .+ code · \d+ %/, { timeout: SYNC })
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('hello from the board')
+    await expect(badge(stu)).toHaveText(/^Running · Calliope/, { timeout: SYNC })
+
+    // saved as student.py (the board's main.py stays), after a soft reset, then imported
+    expect(await micropython(st).files()).toEqual({ 'student.py': code })
+    expect(await micropython(st).softResets()).toBe(1)
+    expect(await micropython(st).longestCode()).toBeLessThanOrEqual(1500)
+    expect(await micropython(st).imports()).toEqual(['student'])
+    expect(s.server.requests).toHaveLength(0)
+    // the room sees the normal REPL, not the raw REPL's protocol
+    const shown = await text(stu)
+    expect(shown).toContain('>>> import student')
+    expect(shown).not.toContain('raw REPL')
+
+    // keystrokes reach the running program
+    const input = stu.locator('.xterm-helper-textarea')
+    await input.focus()
+    await input.pressSequentially('42')
+    await expect.poll(() => micropython(st).written(), { timeout: SYNC }).toBe('42')
+
+    // the next upload stops the running program first
+    await upload(stu, '#>second program\n')
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('second program')
+    expect(await micropython(st).files()).toEqual({ 'student.py': '#>second program\n' })
+    expect(await micropython(st).imports()).toEqual(['student', 'student'])
+  })
+
+  test('a Pico project: main.py runs as student.py next to its modules; a slow boot.py and a board without MicroPython are pointed out', async ({
+    browser,
+  }) => {
+    s = await setup(browser, {
+      stationConfig: { board: 'Raspberry Pi Pico (MicroPython)' },
+      mp: { usbVendorId: 0x2e8a, usbProductId: 0x0005 },
+    })
+    const st = await ready(s.station)
+    const stu = await ready(s.students[0])
+    await connect(st)
+    // a Pico with MicroPython is no "Raspberry Pi board the flasher can't flash"
+    await expect(badge(stu)).toHaveText('Running · Raspberry Pi Pico (MicroPython) · 115200 baud', { timeout: SYNC })
+
+    const project = { file: { 'main.py': 'import helper\n#>main ran\n', 'helper.py': 'X = 1\n' } }
+    await upload(stu, JSON.stringify(project))
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('main ran')
+    expect(await micropython(st).files()).toEqual({ 'student.py': project.file['main.py'], 'helper.py': 'X = 1\n' })
+    expect(await micropython(st).imports()).toEqual(['student'])
+
+    // a boot.py that waits for Wi-Fi (as on an Alvik): MicroPython runs, the soft reset is too slow
+    await micropython(st).set({ bootDelay: 8000 })
+    await upload(stu, '#>slow\n')
+    await expect(badge(stu)).toHaveText('Upload failed', { timeout: SYNC })
+    const slow = await text(stu)
+    expect(slow).toContain('did not come back from its soft reset within 5 s')
+    expect(slow).not.toContain('Does it run MicroPython?')
+    // boot.py ends later; its output reaches the room, as on the real Alvik
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('raw REPL; CTRL-B to exit')
+    await micropython(st).set({ bootDelay: 0 })
+
+    // a board that doesn't answer like MicroPython (e.g. a program in C on it)
+    await micropython(st).set({ silent: true })
+    await upload(stu, '#>never\n')
+    await expect(badge(stu)).toHaveText('Upload failed', { timeout: SYNC })
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('does not answer like MicroPython')
+    expect(await text(stu)).toContain('BOOTSEL')
   })
 
   test("the module follows the classroom's light or dark theme, the terminal stays dark", async ({ browser }) => {
