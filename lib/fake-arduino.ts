@@ -4,7 +4,9 @@ import { MODULE_ORIGIN } from './modules'
 /**
  * A fake Web Serial API (`navigator.serial`) with an Arduino behind it: an
  * ATmega328P with an STK500v1 bootloader (optiboot or the old ATmegaBOOT),
- * for station modules that flash boards. Unlike fake-serial.ts it is binary
+ * or with `protocol: 'stk500v2'` a Mega 2560's stk500boot (which, like the
+ * real one, gives up if bytes arrive within 100 ms of a reset), for station
+ * modules that flash boards. Unlike fake-serial.ts it is binary
  * and has `setSignals`, so the DTR reset into the bootloader works.
  *
  * The board resets when the port opens and when DTR goes low and high again.
@@ -22,10 +24,12 @@ import { MODULE_ORIGIN } from './modules'
 export interface FakeArduinoOptions {
   /** Baud rate of the bootloader: 115200 (optiboot) or 57600 (old Nano bootloader). */
   bootBaud?: number
-  /** Chip signature; 1e 95 0f is the ATmega328P. */
+  /** Chip signature; default 1e 95 0f (ATmega328P), or 1e 98 01 (ATmega2560) with stk500v2. */
   signature?: number[]
   /** Printed by the program each time it starts. */
   bootText?: string
+  /** The bootloader's protocol: stk500v1 (Uno, Nano; default) or stk500v2 (Mega 2560). */
+  protocol?: 'stk500v1' | 'stk500v2'
 }
 
 /** Context hook: install the fake board in every module iframe of this context. */
@@ -42,7 +46,8 @@ function fakeArduino({ moduleOrigin, options }: { moduleOrigin: string; options:
 
   const board = {
     bootBaud: options.bootBaud ?? 115200,
-    signature: options.signature ?? [0x1e, 0x95, 0x0f],
+    // ATmega328P, or the ATmega2560 behind an STK500v2 bootloader
+    signature: options.signature ?? (options.protocol === 'stk500v2' ? [0x1e, 0x98, 0x01] : [0x1e, 0x95, 0x0f]),
     bootText: options.bootText ?? '',
     /** Sent once before the bootloader's first answer after a reset. */
     junk: [] as number[],
@@ -53,7 +58,10 @@ function fakeArduino({ moduleOrigin, options }: { moduleOrigin: string; options:
     /** USB id the port reports (an Uno R3 by default). */
     usbVendorId: 0x2341,
     usbProductId: 0x0043,
-    flash: new Uint8Array(32768).fill(0xff),
+    /** stk500v1 (Uno, Nano) or stk500v2 (Mega 2560) */
+    protocol: options.protocol ?? 'stk500v1',
+    // big enough for an ATmega2560
+    flash: new Uint8Array(262144).fill(0xff),
     flashEnd: 0,
     resets: 0,
     uploads: 0,
@@ -114,8 +122,11 @@ function fakeArduino({ moduleOrigin, options }: { moduleOrigin: string; options:
       if (board.mode === 'program') this.send(encoder.encode(text))
     }
 
+    private resetAt = 0
+
     private reset() {
       board.resets++
+      this.resetAt = performance.now()
       board.mode = 'bootloader'
       this.buffer = []
       this.junkSent = false
@@ -139,9 +150,71 @@ function fakeArduino({ moduleOrigin, options }: { moduleOrigin: string; options:
         return
       }
       if (board.mode !== 'bootloader' || board.dead || this.baudRate !== board.bootBaud) return
+      // as measured on a real Mega 2560: bytes within ~100 ms of the reset
+      // make its bootloader ignore everything, and the program starts
+      if (board.protocol === 'stk500v2' && performance.now() - this.resetAt < 100) {
+        this.startProgram()
+        return
+      }
       this.buffer.push(...chunk)
       this.armBootTimer()
-      this.stk500()
+      if (board.protocol === 'stk500v2') this.stk500v2()
+      else this.stk500()
+    }
+
+    // The STK500v2 subset the Mega 2560's stk500boot implements
+    private stk500v2() {
+      const xor = (bytes: number[]) => bytes.reduce((sum, b) => sum ^ b, 0)
+      while (true) {
+        const start = this.buffer.indexOf(0x1b)
+        if (start === -1) {
+          this.buffer = []
+          return
+        }
+        this.buffer = this.buffer.slice(start)
+        if (this.buffer.length < 5) return
+        const size = (this.buffer[2] << 8) | this.buffer[3]
+        if (this.buffer.length < size + 6) return
+        const message = this.buffer.splice(0, size + 6)
+        if (message[4] !== 0x0e || xor(message) !== 0) continue // stk500boot drops it
+        const body = message.slice(5, 5 + size)
+        const c = body[0]
+        let reply: number[]
+        if (c === 0x01) {
+          board.syncs++
+          reply = [0x01, 0x00, 8, ...encoder.encode('AVRISP_2')]
+        } else if (c === 0x1d) reply = [0x1d, 0x00, 0, 0, 0, board.signature[body[6]] ?? 0, 0x00]
+        else if (c === 0x06) {
+          // as stk500boot.c: all four bytes shifted left (the extended flag falls off)
+          this.address = (((body[1] << 24) | (body[2] << 16) | (body[3] << 8) | body[4]) << 1) >>> 0
+          reply = [0x06, 0x00]
+        } else if (c === 0x10) {
+          board.flash.fill(0xff)
+          board.flashEnd = 0
+          reply = [0x10, 0x00]
+        } else if (c === 0x13) {
+          const n = (body[1] << 8) | body[2]
+          board.flash.set(body.slice(10, 10 + n), this.address)
+          board.flashEnd = Math.max(board.flashEnd, this.address + n)
+          this.address += n
+          reply = [0x13, 0x00]
+        } else if (c === 0x14) {
+          const n = (body[1] << 8) | body[2]
+          reply = [0x14, 0x00, ...board.flash.slice(this.address, this.address + n), 0x00]
+          this.address += n
+        } else if (c === 0x11) {
+          board.uploads++
+          reply = [0x11, 0x00]
+          setTimeout(() => this.startProgram(), 5)
+        } else reply = [c, 0x00]
+        const head = [0x1b, message[1], reply.length >> 8, reply.length & 0xff, 0x0e, ...reply]
+        const out: number[] = []
+        if (!this.junkSent) {
+          out.push(...board.junk)
+          this.junkSent = true
+        }
+        this.send([...out, ...head, xor(head)])
+      }
     }
 
     // The STK500v1 subset optiboot implements

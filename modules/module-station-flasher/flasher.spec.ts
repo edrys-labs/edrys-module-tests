@@ -24,15 +24,28 @@ const MODULE = 'module-station-flasher'
 const SYNC = 15_000
 // a real compile of BLINK on edrys-compile-server (arduino:avr:uno)
 const BLINK_HEX = readFileSync(join(__dirname, 'fixtures', 'blink.hex'), 'utf8')
+// a real compile of MEGA (arduino:avr:mega): 152 KB, so word addresses go past 0xFFFF
+const MEGA_HEX = readFileSync(join(__dirname, 'fixtures', 'mega-152k.hex'), 'utf8')
+const MEGA = readFileSync(join(__dirname, 'fixtures', 'mega-152k.ino'), 'utf8')
+const MEGA_USB = { usbVendorId: 0x2341, usbProductId: 0x0010 }
 const BLINK = '// e2e:blink\nvoid setup(){Serial.begin(9600);pinMode(13,OUTPUT);}\nvoid loop(){Serial.println("e2e:blink");digitalWrite(13,!digitalRead(13));delay(500);}\n'
 
-/** Intel HEX data records -> the program as a hex string (contiguous from 0 in the fixture). */
+/** Intel HEX -> the program as a hex string from address 0 (gaps 0xff, even length). */
 function programHex(hex: string) {
-  let out = ''
+  const bytes: number[] = []
+  let base = 0
   for (const line of hex.split(/\r?\n/)) {
-    if (line.slice(7, 9) === '00') out += line.slice(9, 9 + 2 * parseInt(line.slice(1, 3), 16))
+    const type = line.slice(7, 9)
+    const data = line.slice(9, 9 + 2 * parseInt(line.slice(1, 3), 16))
+    if (type === '02') base = parseInt(data, 16) * 16
+    else if (type === '04') base = parseInt(data, 16) * 65536
+    else if (type === '00') {
+      const address = base + parseInt(line.slice(3, 7), 16)
+      for (let i = 0; i < data.length / 2; i++) bytes[address + i] = parseInt(data.slice(2 * i, 2 * i + 2), 16)
+    }
   }
-  return out.toLowerCase()
+  if (bytes.length % 2) bytes.push(0xff)
+  return Array.from(bytes, (b) => (b ?? 0xff).toString(16).padStart(2, '0')).join('')
 }
 
 const badge = (frame: Frame) => frame.locator('#badge')
@@ -41,7 +54,12 @@ function text(frame: Frame): Promise<string> {
   return frame.evaluate(() => {
     const buffer = (window as any).term.buffer.active
     const out: string[] = []
-    for (let i = 0; i < buffer.length; i++) out.push(buffer.getLine(i).translateToString(true))
+    for (let i = 0; i < buffer.length; i++) {
+      const line = buffer.getLine(i)
+      // a long line xterm wrapped continues the previous one
+      if (line.isWrapped && out.length) out[out.length - 1] += line.translateToString(true)
+      else out.push(line.translateToString(true))
+    }
     return out.join('\n')
   })
 }
@@ -225,6 +243,46 @@ test.describe('module-station-flasher', () => {
     // the monitor is open again afterwards
     await expect.poll(() => arduino(st).baudRate(), { timeout: SYNC }).toBe(9600)
     expect(await arduino(st).isOpen()).toBe(true)
+  })
+
+  test('a Mega 2560 is flashed with STK500v2, also above 128 KB', async ({ browser }) => {
+    s = await setup(browser, { stationConfig: { board: 'Arduino Mega 2560' }, board: { protocol: 'stk500v2' } })
+    s.server.done('// e2e:mega-huge', MEGA_HEX)
+    const st = await ready(s.station)
+    const stu = await ready(s.students[0])
+    await arduino(st).set({ ...MEGA_USB, junk: [0x00, 0x1b, 0xfe] })
+    await connect(st)
+    await expect(badge(stu)).toHaveText('Running · Arduino Mega 2560 · 9600 baud', { timeout: SYNC })
+
+    await upload(stu, MEGA)
+    await expect(badge(stu)).toHaveText(/Flashing your code · \d+ %/, { timeout: SYNC })
+    await expect(badge(stu)).toHaveText('Running · Arduino Mega 2560 · 9600 baud', { timeout: 60_000 })
+    expect(s.server.requests[0].fqbn).toBe('arduino:avr:mega')
+    expect(await arduino(st).uploads()).toBe(1)
+    expect(await arduino(st).flashed()).toBe(programHex(MEGA_HEX))
+    // no warning about the board: its USB id matches the setting
+    expect(await text(stu)).not.toContain('looks like')
+
+    await expect.poll(() => arduino(st).mode(), { timeout: SYNC }).toBe('program')
+    await arduino(st).print('mega-big 15\n')
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('mega-big 15')
+  })
+
+  test('a board whose USB id differs from the setting is pointed out', async ({ browser }) => {
+    // the class says Uno, the station has a Mega
+    s = await setup(browser, { stationConfig: { board: 'Arduino Uno' }, board: { protocol: 'stk500v2' } })
+    const st = await ready(s.station)
+    const stu = await ready(s.students[0])
+    await arduino(st).set(MEGA_USB)
+    await connect(st)
+    await expect
+      .poll(() => text(stu), { timeout: SYNC })
+      .toContain("the station's board looks like an Arduino Mega 2560, but the class is set to Arduino Uno")
+
+    await upload(stu, BLINK)
+    await expect(badge(stu)).toHaveText('Flashing failed', { timeout: 60_000 })
+    await expect.poll(() => text(stu), { timeout: SYNC }).toContain('It looks like an Arduino Mega 2560: set board')
+    expect(await arduino(st).uploads()).toBe(0)
   })
 
   test("a board the flasher can't flash is named, its code isn't compiled, the monitor still works", async ({
