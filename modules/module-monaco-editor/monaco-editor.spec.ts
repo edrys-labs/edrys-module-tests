@@ -308,6 +308,35 @@ test.describe('module-monaco-editor', () => {
     expect(await code(stu)).toBe(CODE)
   })
 
+  test('without synchronize, the own copy is kept across reloads until the start code changes', async ({ browser }) => {
+    await start(browser, withConfig({ value: CODE }))
+    const t = await ready(teacher!)
+    await ready(student!)
+
+    // reloaded right after typing: the save on pagehide keeps the last keystrokes
+    await typeAtEnd(t, ' // mine')
+    await teacher!.page.reload()
+    await expect.poll(async () => code(await ready(teacher!)), { timeout: SYNC }).toBe(`${CODE} // mine`)
+    // kept in the teacher's browser only
+    expect(await code(await ready(student!))).toBe(CODE)
+
+    // a new start code replaces the old copy
+    await setModules(teacher!, withConfig({ value: '// new task' }))
+    await teacher!.page.reload()
+    await expect.poll(async () => code(await ready(teacher!)), { timeout: SYNC }).toBe('// new task')
+  })
+
+  test('with synchronize, a copy saved in local mode is not used', async ({ browser }) => {
+    await start(browser, withConfig({ value: CODE }))
+    await typeAtEnd(await ready(teacher!), ' // local')
+    await teacher!.page.reload()
+    await expect.poll(async () => code(await ready(teacher!)), { timeout: SYNC }).toBe(`${CODE} // local`)
+
+    await setModules(teacher!, withConfig({ ...SHARED, value: CODE }))
+    await teacher!.page.reload()
+    await expect.poll(async () => code(await ready(teacher!)), { timeout: SYNC }).toBe(CODE)
+  })
+
   test('two editors with different editorIds in one room stay independent', async ({ browser }) => {
     const first = moduleUrl(MODULE, ENTRY)
     const second = moduleUrl(MODULE, `${ENTRY}?second`)
@@ -536,6 +565,14 @@ test.describe('module-monaco-editor', () => {
       await openTab(stu, 'main.cpp')
       await openTab(stu, 'util.h')
       expect(await code(stu)).toBe(`${UTIL} mine`)
+
+      // each file's copy is kept across a reload
+      await student!.page.reload()
+      const again = await ready(student!)
+      await openTab(again, 'util.h')
+      await expect.poll(() => code(again), { timeout: SYNC }).toBe(`${UTIL} mine`)
+      await openTab(again, 'main.cpp')
+      expect(await code(again)).toBe(MAIN)
     })
   })
 })
