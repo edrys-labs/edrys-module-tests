@@ -121,6 +121,8 @@ async function press(frame: Frame, button: (frame: Frame) => Locator) {
   await scrollTo(frame, 'end')
   await button(frame).click()
 }
+/** The pill in the control bar: shared / local only / not saved in this browser. */
+const syncBadge = (frame: Frame) => frame.getByRole('status')
 const languageSelect = (frame: Frame) => frame.locator('#lang-select')
 const languageBadge = (frame: Frame) => frame.locator('#lang-badge')
 
@@ -193,7 +195,7 @@ test.describe('module-monaco-editor', () => {
     const stu = await ready(student!)
     await expect.poll(() => code(stu)).toBe(CODE)
 
-    await expect(stu.locator('#sync-dot')).toHaveAttribute('aria-label', /^Shared/)
+    await expect(syncBadge(stu)).toHaveText('shared')
 
     await typeAtEnd(t, ' // from teacher')
     await expect.poll(() => code(stu), { timeout: SYNC }).toBe(`${CODE} // from teacher`)
@@ -294,7 +296,7 @@ test.describe('module-monaco-editor', () => {
     const t = await ready(teacher!)
     const stu = await ready(student!)
     await expect.poll(() => code(stu)).toBe(CODE)
-    await expect(t.locator('#sync-dot')).toHaveAttribute('aria-label', /^Local only/)
+    await expect(syncBadge(t)).toHaveText('local only')
     await listen(stu)
 
     await typeAtEnd(t, ' // only mine')
@@ -324,6 +326,21 @@ test.describe('module-monaco-editor', () => {
     await setModules(teacher!, withConfig({ value: '// new task' }))
     await teacher!.page.reload()
     await expect.poll(async () => code(await ready(teacher!)), { timeout: SYNC }).toBe('// new task')
+  })
+
+  test('without synchronize, the pill says so when the browser refuses to keep the copy', async ({ browser }) => {
+    await start(browser, withConfig({ value: CODE }))
+    const stu = await ready(student!)
+    await expect(syncBadge(stu)).toHaveText('local only')
+    await stu.evaluate(() => {
+      Storage.prototype.setItem = () => {
+        throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      }
+    })
+
+    await typeAtEnd(stu, ' // mine')
+    await expect(syncBadge(stu)).toHaveText('not saved in this browser')
+    await expect(syncBadge(stu)).toHaveClass(/\bwarn\b/)
   })
 
   test('with synchronize, a copy saved in local mode is not used', async ({ browser }) => {
@@ -557,7 +574,7 @@ test.describe('module-monaco-editor', () => {
     test('without synchronize, the tabs still work locally', async ({ browser }) => {
       await start(browser, withConfig({ file: FILES }))
       const stu = await ready(student!)
-      await expect(stu.locator('#sync-dot')).toHaveAttribute('aria-label', /^Local only/)
+      await expect(syncBadge(stu)).toHaveText('local only')
 
       await openTab(stu, 'util.h')
       await expect.poll(() => code(stu)).toBe(UTIL)
