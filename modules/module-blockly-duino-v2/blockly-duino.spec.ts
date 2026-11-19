@@ -15,8 +15,9 @@ import {
 
 /**
  * module-blockly-duino-v2 in a real edrys-Lite: a teacher and a student in
- * the lobby (the module is shown everywhere). Peers share one Blockly
- * workspace through `xml` messages; the run button sends the generated
+ * the lobby (the module is shown everywhere). With synchronize, peers share
+ * one Blockly workspace in the room's state; without it, each keeps their own
+ * copy in their browser; the run button sends the generated
  * Arduino code with the `execute` subject (or config.runCommand).
  */
 
@@ -143,6 +144,14 @@ function lostWithin(frame: Frame, marker: string, ms: number): Promise<boolean> 
 /** The run button, by its accessible name (English). */
 const runButton = (frame: Frame) => frame.getByRole('button', { name: 'Run', exact: true })
 
+/**
+ * Teacher: add the module with a shared program (synchronize), plus `config`.
+ * `synchronize: false` in `config` gives each peer a program of their own.
+ */
+function addModule(teacher: Session, config: object = {}) {
+  return setModules(teacher, [{ url: moduleUrl(MODULE, ENTRY), config: { synchronize: true, ...config } }])
+}
+
 /** A student who opens the class link and stays in the lobby. */
 function addStudent(browser: Browser, classUrl: string) {
   return joinClass(browser, classUrl, prepare)
@@ -181,7 +190,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('the configured program and board are loaded for every peer', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(1111), board: 'arduino_mega' } }])
+    await addModule(teacher!, { code: delayXml(1111), board: 'arduino_mega' })
     student = await addStudent(browser, classUrl)
 
     for (const frame of [await ready(teacher!), await ready(student)]) {
@@ -192,7 +201,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('without a board, blocks with a pin dropdown use the Arduino Uno pins', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     const stu = await ready(student)
@@ -209,7 +218,7 @@ test.describe('module-blockly-duino-v2', () => {
 
   test('the trim block gives Arduino code: a helper that returns the trimmed text', async () => {
     // Arduino's String::trim() returns nothing, so `x.trim()` as a value does not compile
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     const t = await ready(teacher!)
 
     const generated = await t.evaluate(() => {
@@ -237,7 +246,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('every Logic, Loops, Math, Text and Colour block gives Arduino code, not JavaScript', async () => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     const t = await ready(teacher!)
 
     // each block as the toolbox offers it, alone and as the value of a print block
@@ -282,7 +291,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('the toolbox has no Lists category and no blocks that need a list', async () => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     const t = await ready(teacher!)
 
     const toolbox = await t.evaluate(() => {
@@ -300,7 +309,7 @@ test.describe('module-blockly-duino-v2', () => {
 
   test('a program with a pin block survives a module reload, and the module keeps writing changes', async ({ browser }) => {
     // pin 50 exists only on the Mega
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: digitalWriteXml(50), board: 'arduino_mega' } }])
+    await addModule(teacher!, { code: digitalWriteXml(50), board: 'arduino_mega' })
     student = await addStudent(browser, classUrl)
     let stu = await ready(student)
     await expect.poll(() => code(stu), { timeout: SYNC }).toContain('digitalWrite(50, HIGH);')
@@ -318,7 +327,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('after a module reload, the program and later changes of the others arrive', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     let stu = await ready(student)
@@ -333,7 +342,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('blocks added by one peer show up for the other', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     const stu = await ready(student)
@@ -347,7 +356,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('the run button sends the generated code with the execute subject', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(1111) } }])
+    await addModule(teacher!, { code: delayXml(1111) })
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     const stu = await ready(student)
@@ -363,7 +372,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('config.runCommand changes the subject the run button sends', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(1111), runCommand: 'flash' } }])
+    await addModule(teacher!, { code: delayXml(1111), runCommand: 'flash' })
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     const stu = await ready(student)
@@ -377,7 +386,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('a run that cannot be sent is reported', async () => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     const t = await ready(teacher!)
     await closeSideMenu(teacher!)
     // enabled once the module is connected
@@ -394,7 +403,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('the top bar shows the sync state, and the run button has a name', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     const stu = await ready(student)
@@ -432,7 +441,7 @@ test.describe('module-blockly-duino-v2', () => {
     ]
     for (const [file, expected] of examples) {
       const xml = readFileSync(join(MODULES_DIR, MODULE, 'examples', file), 'utf8')
-      await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: xml } }])
+      await addModule(teacher!, { code: xml })
       // the module reloads for the new config (the frame can be replaced)
       await expect
         .poll(async () => (await moduleFrame(teacher!, MODULE)).evaluate(() => (window as any).editor?.getValue() || '').catch(() => ''), {
@@ -444,7 +453,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('a student who joins later sees the current program', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(1111) } }])
+    await addModule(teacher!, { code: delayXml(1111) })
     const t = await ready(teacher!)
     await expect.poll(() => code(t), { timeout: SYNC }).toContain('delay(1111);')
     await addDelay(t, 2222, 200)
@@ -455,7 +464,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('a student who joins later does not reset the program of the others', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(1111) } }])
+    await addModule(teacher!, { code: delayXml(1111) })
     const t = await ready(teacher!)
     await expect.poll(() => code(t), { timeout: SYNC }).toContain('delay(1111);')
     await addDelay(t, 2222, 200)
@@ -467,7 +476,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('an edit made right after receiving a change is kept', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     const stu = await ready(student)
@@ -482,10 +491,8 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('an unknown board name is reported, and the configured program still loads and syncs', async ({ browser }) => {
-    await setModules(teacher!, [
-      // a plausible typo for arduino_mega
-      { url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(1111), board: 'arduino_mega2560' } },
-    ])
+    // a plausible typo for arduino_mega
+    await addModule(teacher!, { code: delayXml(1111), board: 'arduino_mega2560' })
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     const stu = await ready(student)
@@ -500,10 +507,8 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('a start program that cannot be loaded is reported, and edits still sync', async ({ browser }) => {
-    await setModules(teacher!, [
-      // a block type of BlocklyDuino v1, as in the module's own examples/
-      { url: moduleUrl(MODULE, ENTRY), config: { code: '<xml><block type="base_delay"></block></xml>' } },
-    ])
+    // a block type of BlocklyDuino v1, as in the module's own examples/
+    await addModule(teacher!, { code: '<xml><block type="base_delay"></block></xml>' })
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     const stu = await ready(student)
@@ -518,14 +523,14 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('a valid config shows no error', async () => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(1111), board: 'arduino_uno' } }])
+    await addModule(teacher!, { code: delayXml(1111), board: 'arduino_uno' })
     const t = await ready(teacher!)
     await expect.poll(() => code(t), { timeout: SYNC }).toContain('delay(1111);')
     await expect(t.getByRole('alert')).toBeHidden()
   })
 
   test('the teacher picks a board in the board dialog, and it applies to the whole room', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(1111), board: 'arduino_mega' } }])
+    await addModule(teacher!, { code: delayXml(1111), board: 'arduino_mega' })
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     const stu = await ready(student)
@@ -565,7 +570,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('the board dialog closes with its close button and by clicking beside it', async () => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     const t = await ready(teacher!)
     await closeSideMenu(teacher!)
 
@@ -582,7 +587,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('students get no board button, and nobody gets the desktop-only buttons', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     const stu = await ready(student)
@@ -599,7 +604,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('the help dialog opens from the menu and fits a narrow module', async () => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     const t = await ready(teacher!)
     await closeSideMenu(teacher!)
     // it was centred with the size of `top`, the cross-origin edrys page, which throws
@@ -626,7 +631,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('Reset brings the room back to the start program and board, and keeps other modules\' storage', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(1111), board: 'arduino_mega' } }])
+    await addModule(teacher!, { code: delayXml(1111), board: 'arduino_mega' })
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     const stu = await ready(student)
@@ -656,8 +661,72 @@ test.describe('module-blockly-duino-v2', () => {
     expect(await t.evaluate(() => localStorage.getItem('another-module'))).toBe('keep me')
   })
 
+  test('without synchronize, each peer builds their own program, kept across a reload, but the board is shared', async ({ browser }) => {
+    await addModule(teacher!, { synchronize: false, code: delayXml(1111), board: 'arduino_mega' })
+    student = await addStudent(browser, classUrl)
+    let t = await ready(teacher!)
+    let stu = await ready(student)
+    for (const frame of [t, stu]) {
+      await expect.poll(() => code(frame)).toContain('delay(1111);')
+      await expect(frame.getByRole('status')).toHaveText('local only')
+    }
+
+    await addDelay(stu, 2222, 200)
+    await addDelay(t, 3333, 200)
+    // reloaded right after the edit: the save on pagehide keeps it
+    stu = await reloadModule(student)
+    await expect.poll(() => code(stu)).toContain('delay(2222);')
+    expect(await code(stu)).toContain('delay(1111);')
+    expect(await code(stu)).not.toContain('delay(3333);')
+    expect(await code(t)).not.toContain('delay(2222);')
+    expect(await t.evaluate(() => [...(window as any).Edrys.getState().keys()].filter((k: string) => k === 'blocklyXml'))).toEqual([])
+
+    // the board is the station's hardware: the teacher's pick applies to the room
+    await closeSideMenu(teacher!)
+    await t.locator('#boardButton').click()
+    await t.locator('#boardDescriptionSelector').selectOption('arduino_uno')
+    await t.locator('#boardListModalDialogOkay').click()
+    await expect(stu.locator('#boardLabel')).toHaveText('Arduino Uno', { timeout: SYNC })
+
+    // Reset: back to the start program for this peer only
+    await t.locator('#menuButton').click()
+    await t.locator('#resetButton_span_menu').click()
+    await t.locator('#customDialogOkay').click()
+    await expect.poll(() => code(t)).not.toContain('delay(3333);')
+    expect(await code(t)).toContain('delay(1111);')
+    t = await reloadModule(teacher!)
+    expect(await code(t)).not.toContain('delay(3333);')
+    expect(await code(stu)).toContain('delay(2222);')
+  })
+
+  test('without synchronize, a new start program replaces the own copy', async ({ browser }) => {
+    await addModule(teacher!, { synchronize: false, code: delayXml(1111) })
+    student = await addStudent(browser, classUrl)
+    await addDelay(await ready(student), 2222, 200)
+    await expect.poll(async () => code(await reloadModule(student!))).toContain('delay(2222);')
+
+    await addModule(teacher!, { synchronize: false, code: delayXml(4444) })
+    const stu = await reloadModule(student)
+    await expect.poll(() => code(stu), { timeout: SYNC }).toContain('delay(4444);')
+    expect(await code(stu)).not.toContain('delay(2222);')
+  })
+
+  test('without synchronize, the status says so when the browser refuses to keep the program', async ({ browser }) => {
+    await addModule(teacher!, { synchronize: false })
+    student = await addStudent(browser, classUrl)
+    const stu = await ready(student)
+    await stu.evaluate(() => {
+      Storage.prototype.setItem = () => {
+        throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      }
+    })
+
+    await addDelay(stu, 2222, 50)
+    await expect(stu.getByRole('status')).toHaveText('not saved in this browser')
+  })
+
   test('closing Setup leaves the edrys page where it was', async () => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY) }])
+    await addModule(teacher!)
     const t = await ready(teacher!)
     await closeSideMenu(teacher!)
     const iframe = teacher!.page.locator('iframe').first()
@@ -678,7 +747,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test('Setup: each user picks language and block theme, and keeps them when the module reloads', async ({ browser }) => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(1111) } }])
+    await addModule(teacher!, { code: delayXml(1111) })
     student = await addStudent(browser, classUrl)
     const t = await ready(teacher!)
     let stu = await ready(student)
@@ -715,7 +784,7 @@ test.describe('module-blockly-duino-v2', () => {
     await expect(t.locator('#themeMenu')).toHaveValue('classic')
 
     // and kept when edrys reloads the module from its plain URL (e.g. a new room or settings)
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(1111), board: 'arduino_nano' } }])
+    await addModule(teacher!, { code: delayXml(1111), board: 'arduino_nano' })
     // the new config shows once the reloaded frame is up
     await expect
       .poll(async () => (await moduleFrame(student!, MODULE)).locator('#boardLabel').textContent({ timeout: 1_000 }).catch(() => ''), {
@@ -728,7 +797,7 @@ test.describe('module-blockly-duino-v2', () => {
   })
 
   test("the module follows the classroom's light or dark theme, blocks keep their block theme", async () => {
-    await setModules(teacher!, [{ url: moduleUrl(MODULE, ENTRY), config: { code: delayXml(500) } }])
+    await addModule(teacher!, { code: delayXml(500) })
     const t = await ready(teacher!)
     const blockly = () =>
       t.evaluate(() => {
