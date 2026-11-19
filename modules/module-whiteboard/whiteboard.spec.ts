@@ -285,6 +285,45 @@ test.describe('module-whiteboard', () => {
     expect(await sharedKeys(student)).toEqual([])
   })
 
+  test('without synchronize, the own board is kept across a reload, in that browser only', async ({ browser }) => {
+    await addModule(teacher!, null)
+    student = await addStudent(browser, classUrl)
+    await drawRectangle(teacher!)
+    await drawEllipse(student)
+
+    // reloaded right after drawing: the save on pagehide keeps the last stroke
+    await teacher!.page.reload()
+    await expect.poll(() => shapes(teacher!), { timeout: SYNC }).toEqual([RECTANGLE])
+    await student.page.reload()
+    await expect.poll(() => shapes(student!), { timeout: SYNC }).toEqual([ELLIPSE])
+    expect(await sharedKeys(teacher!)).toEqual([])
+
+    // a shape deleted before the reload stays deleted
+    await (await ready(teacher!)).evaluate(() => {
+      const api = (window as any).excalidrawAPI
+      api.updateScene({ elements: api.getSceneElements().map((e: any) => ({ ...e, isDeleted: true, version: e.version + 1 })) })
+    })
+    expect(await shapes(teacher!)).toEqual([])
+    await teacher!.page.reload()
+    await ready(teacher!)
+    expect(await shapes(teacher!)).toEqual([])
+  })
+
+  test('without synchronize, the badge says so when the browser refuses to keep the board', async ({ browser }) => {
+    await addModule(teacher!, null)
+    student = await addStudent(browser, classUrl)
+    const frame = await ready(student)
+    await frame.evaluate(() => {
+      Storage.prototype.setItem = () => {
+        throw new DOMException('The quota has been exceeded.', 'QuotaExceededError')
+      }
+    })
+
+    await drawRectangle(student)
+    await expect(badge(frame)).toHaveText('Only you · not saved in this browser')
+    await expect(badge(frame)).toHaveAttribute('data-sync', 'unsaved')
+  })
+
   test('synchronize unticked in the settings form keeps the boards apart', async ({ browser }) => {
     await addModule(teacher!, { synchronize: false })
     student = await addStudent(browser, classUrl)
