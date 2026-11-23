@@ -80,8 +80,11 @@ test.describe('module-serial-plotter', () => {
 
     for (const frame of [st, stu]) {
       await expect(pill(frame)).toHaveText('Waiting for data')
-      await expect(empty(frame)).toContainText('serial-plotter.py --emit')
+      await expect(empty(frame)).toContainText('No data yet')
     }
+    // the set-up hint is for the station (and teacher); students start it through Execute
+    await expect(empty(st)).toContainText('serial-plotter.py --emit')
+    await expect(empty(stu)).not.toContainText('serial-plotter.py')
 
     const first = osc({ type: 'radar', start: true, samples: [] }) + 'no scan yet'
     const batch = osc({ type: 'radar', samples: [[10, 120], [11, 118], [90, 42]] }) + '\r\x1b[Klast: 90° → 42'
