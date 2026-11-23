@@ -15,7 +15,8 @@ import {
  * module-blockly-micropython in a real edrys-Lite: a teacher and students in
  * the lobby (the module is shown everywhere). BlockMirror shows the program
  * as blocks and as Python; with synchronize, peers share one program (Python
- * text) in the room's state; without it, each keeps their own copy in their
+ * text) in the room's state; config.board picks the toolbox (Calliope mini 3,
+ * micro:bit or generic); without it, each keeps their own copy in their
  * browser; the run button sends the Python with the `execute` subject (or
  * config.runCommand), which module-micropython-simulator runs.
  */
@@ -97,17 +98,27 @@ async function received(frame: Frame, subject: string): Promise<string[]> {
 
 const status = (frame: Frame) => frame.locator('#status')
 
-/** The toolbox's Calliope blocks (the categories before the separator), as Python snippets. */
-const calliopeSnippets = (frame: Frame) =>
-  frame.evaluate(() => {
-    const toolbox = (window as any).BlockMirrorBlockEditor.prototype.TOOLBOXES.calliope
+/** A board's own toolbox blocks (the categories before the separator), as Python snippets. */
+const boardSnippets = (frame: Frame, board: string) =>
+  frame.evaluate((board) => {
+    const toolbox = (window as any).BlockMirrorBlockEditor.prototype.TOOLBOXES[board]
     const out: string[] = []
     for (const category of toolbox) {
       if (typeof category === 'string') break
       out.push(...category.blocks)
     }
     return out as string[]
-  })
+  }, board)
+
+/** The names of the categories in the toolbox the editor shows. */
+const categories = (frame: Frame) =>
+  frame.locator('.blocklyTreeLabel').evaluateAll((labels) => labels.map((l) => l.textContent?.trim() ?? ''))
+
+// the boards module-micropython-simulator simulates: their blocks run there
+const SIMULATED = [
+  { board: 'calliope', simulator: 'calliope-mini-3', name: 'Calliope mini 3', import: 'from calliopemini import *' },
+  { board: 'microbit', simulator: 'microbit-v2', name: 'micro:bit V2', import: 'from microbit import *' },
+]
 
 /** Each snippet's Python as the generator writes it when that block alone is dragged in, with the imports it adds. */
 const generated = (frame: Frame, snippets: string[]) =>
@@ -252,88 +263,124 @@ test.describe('module-blockly-micropython', () => {
     await expect(sim.locator('#stdout')).toContainText('hello 42', { timeout: SYNC })
   })
 
-  test('every Calliope block of the toolbox runs on the simulated Calliope mini 3', async ({ browserName }) => {
-    // In WebKit, a simulator that starts below the visible part of the page
-    // never finishes display.scroll, with any module above it (also seen with
-    // module-markdown-it); a simulator issue, not this module's
-    test.skip(browserName === 'webkit', 'the simulator does not finish display.scroll when it starts off-screen in WebKit')
-    await setModules(teacher!, [
-      { url: moduleUrl(MODULE, 'index.html'), config: { synchronize: true } },
-      { url: moduleUrl(SIMULATOR, 'index.html'), config: { board: 'calliope-mini-3' } },
-    ])
-    const t = await ready(teacher!)
-    const sim = await moduleFrame(teacher!, SIMULATOR, 60_000)
-    await expect(sim.locator('#status')).not.toHaveText('loading', { timeout: 45_000 })
+  for (const b of SIMULATED) {
+    /** Teacher: this module with board b, and the simulator of b, in the room. */
+    async function withSimulator(browserName: string) {
+      // In WebKit, a simulator that starts below the visible part of the page
+      // never finishes display.scroll, with any module above it (also seen with
+      // module-markdown-it); a simulator issue, not this module's
+      test.skip(browserName === 'webkit', 'the simulator does not finish display.scroll when it starts off-screen in WebKit')
+      await setModules(teacher!, [
+        { url: moduleUrl(MODULE, 'index.html'), config: { synchronize: true, board: b.board } },
+        { url: moduleUrl(SIMULATOR, 'index.html'), config: { board: b.simulator } },
+      ])
+      const t = await ready(teacher!)
+      const sim = await moduleFrame(teacher!, SIMULATOR, 60_000)
+      await expect(sim.locator('#status')).not.toHaveText('loading', { timeout: 45_000 })
+      return { t, sim }
+    }
 
-    // the Calliope blocks, without blocks that have an empty slot or never end
-    const snippets = (await calliopeSnippets(t)).filter((b) => !b.includes('___') && !b.startsWith('while True'))
-    expect(snippets.length).toBeGreaterThan(25)
+    test(`every ${b.board} block of the toolbox runs on the simulated ${b.name}`, async ({ browserName }) => {
+      const { t, sim } = await withSimulator(browserName)
 
-    // each block's Python as the generator writes it when the block is
-    // dragged in (with the imports it adds), imports first, then the blocks
-    // in toolbox order, each followed by a line that names it, so a failure
-    // shows which block stopped the program
-    const codes = await generated(t, snippets)
-    const imports: string[] = []
-    const body: string[] = []
-    snippets.forEach((snippet, i) => {
-      for (const line of codes[i].split('\n')) {
-        if (!line.trim()) continue
-        if (/^(from \S+ )?import /.test(line)) {
-          if (!imports.includes(line)) imports.push(line)
-        } else body.push(line)
-      }
-      body.push('print("done:", ' + JSON.stringify(snippet) + ')')
+      // the board's blocks, without blocks that have an empty slot or never end
+      const snippets = (await boardSnippets(t, b.board)).filter((s) => !s.includes('___') && !s.startsWith('while True'))
+      expect(snippets.length).toBeGreaterThan(25)
+
+      // each block's Python as the generator writes it when the block is
+      // dragged in (with the imports it adds), imports first, then the blocks
+      // in toolbox order, each followed by a line that names it, so a failure
+      // shows which block stopped the program
+      const codes = await generated(t, snippets)
+      const imports: string[] = []
+      const body: string[] = []
+      snippets.forEach((snippet, i) => {
+        for (const line of codes[i].split('\n')) {
+          if (!line.trim()) continue
+          if (/^(from \S+ )?import /.test(line)) {
+            if (!imports.includes(line)) imports.push(line)
+          } else body.push(line)
+        }
+        body.push('print("done:", ' + JSON.stringify(snippet) + ')')
+      })
+      const program = [...imports, ...body, 'print("toolbox", "ok")', ''].join('\n')
+      await t.evaluate((program) => (window as any).BlocklyMicroPython.editor.setCode(program), program)
+      await expect.poll(() => code(t)).toContain('print("toolbox", "ok")')
+
+      await t.locator('#run').click()
+      await expect(sim.locator('#stdout')).toContainText('toolbox ok', { timeout: 30_000 })
+      await expect(sim.locator('#stdout')).not.toContainText('Error')
+      expect(program).toContain(b.import)
+      expect(program).toContain('import music')
+      expect(program).toContain('import neopixel')
     })
-    const program = [...imports, ...body, 'print("toolbox", "ok")', ''].join('\n')
-    await t.evaluate((program) => (window as any).BlocklyMicroPython.editor.setCode(program), program)
-    await expect.poll(() => code(t)).toContain('print("toolbox", "ok")')
 
-    await t.locator('#run').click()
-    await expect(sim.locator('#stdout')).toContainText('toolbox ok', { timeout: 30_000 })
-    await expect(sim.locator('#stdout')).not.toContainText('Error')
-    expect(program).toContain('import music')
-    expect(program).toContain('import neopixel')
-  })
+    test(`every ${b.board} block on its own writes the imports it needs, once`, async () => {
+      await addModule(teacher!, { board: b.board })
+      const t = await ready(teacher!)
+      // without the blocks on the rgb variable (rgb.show(), rgb[0] = ...), which need no import
+      const snippets = (await boardSnippets(t, b.board)).filter(
+        (s) => !s.includes('___') && !s.startsWith('while True') && !s.startsWith('rgb')
+      )
+      const codes = await generated(t, snippets)
+      snippets.forEach((snippet, i) => {
+        const lines = codes[i].split('\n')
+        const count = (line: string) => lines.filter((l) => l === line).length
+        // the music blocks only need music; every other board block needs the board's module
+        const needed = snippet.startsWith('music.') ? 'import music' : b.import
+        expect(count(needed), `${snippet} writes "${needed}" once:\n${codes[i]}`).toBe(1)
+        if (snippet.includes('neopixel.')) expect(count('import neopixel'), snippet).toBe(1)
+      })
+      // and in a program: no import twice, none that the program already has
+      const [dragged] = await generated(t, [`${b.import}\nsleep(1000)\nprint(temperature())\ndisplay.show(Image.HEART)`])
+      expect(dragged.split('\n').filter((l) => l === b.import)).toHaveLength(1)
+    })
 
-  test('every Calliope block on its own writes the imports it needs, once', async () => {
+    test(`a block-only ${b.board} program with plain calls runs on the simulator`, async ({ browserName }) => {
+      const { t, sim } = await withSimulator(browserName)
+      // no import block: the import comes only from the blocks
+      const [program] = await generated(t, ['sleep(10)\nprint("plain", running_time() >= 0, temperature() > -40)'])
+      expect(program).toContain(b.import)
+      await t.evaluate((program) => (window as any).BlocklyMicroPython.editor.setCode(program), program)
+      await t.locator('#run').click()
+      await expect(sim.locator('#stdout')).toContainText('plain True True', { timeout: SYNC })
+      await expect(sim.locator('#stdout')).not.toContainText('Error')
+    })
+  }
+
+  test('without config.board, the toolbox is the Calliope one', async () => {
     await addModule(teacher!)
     const t = await ready(teacher!)
-    // without the blocks on the rgb variable (rgb.show(), rgb[0] = ...), which need no import
-    const snippets = (await calliopeSnippets(t)).filter(
-      (b) => !b.includes('___') && !b.startsWith('while True') && !b.startsWith('rgb')
-    )
-    const codes = await generated(t, snippets)
-    snippets.forEach((snippet, i) => {
-      const lines = codes[i].split('\n')
-      const count = (line: string) => lines.filter((l) => l === line).length
-      // the music blocks only need music; every other Calliope block needs calliopemini
-      const needed = snippet.startsWith('music.') ? 'import music' : 'from calliopemini import *'
-      expect(count(needed), `${snippet} writes "${needed}" once:\n${codes[i]}`).toBe(1)
-      if (snippet.includes('neopixel.')) expect(count('import neopixel'), snippet).toBe(1)
-    })
-    // and in a program: no import twice, none that the program already has
-    const dragged = await generated(t, ['from calliopemini import *\nsleep(1000)\nprint(temperature())\ndisplay.show(Image.HEART)'])
-    expect(dragged[0].split('\n').filter((l) => l === 'from calliopemini import *')).toHaveLength(1)
+    await expect.poll(() => categories(t)).toContain('RGB LEDs')
+    expect(await categories(t)).toContain('Display')
   })
 
-  test('a block-only program with plain Calliope calls runs on the simulator', async ({ browserName }) => {
-    test.skip(browserName === 'webkit', 'the simulator does not finish display.scroll when it starts off-screen in WebKit')
-    await setModules(teacher!, [
-      { url: moduleUrl(MODULE, 'index.html'), config: { synchronize: true } },
-      { url: moduleUrl(SIMULATOR, 'index.html'), config: { board: 'calliope-mini-3' } },
-    ])
+  test('the generic board has only general blocks, with no board import', async () => {
+    await addModule(teacher!, { board: 'generic' })
     const t = await ready(teacher!)
-    const sim = await moduleFrame(teacher!, SIMULATOR, 60_000)
-    await expect(sim.locator('#status')).not.toHaveText('loading', { timeout: 45_000 })
+    await expect.poll(() => categories(t)).toContain('Pins')
+    const shown = await categories(t)
+    for (const name of ['Basic', 'Logic', 'Loops', 'Math']) expect(shown).toContain(name)
+    for (const name of ['Display', 'Input', 'Sensors', 'RGB LEDs', 'Music']) expect(shown).not.toContain(name)
 
-    // no import block: the import comes only from the blocks
-    const [program] = await generated(t, ['sleep(10)\nprint("plain", running_time() >= 0, temperature() > -40)'])
-    expect(program).toContain('from calliopemini import *')
-    await t.evaluate((program) => (window as any).BlocklyMicroPython.editor.setCode(program), program)
-    await t.locator('#run').click()
-    await expect(sim.locator('#stdout')).toContainText('plain True True', { timeout: SYNC })
-    await expect(sim.locator('#stdout')).not.toContainText('Error')
+    const snippets = (await boardSnippets(t, 'generic')).filter((s) => !s.includes('___') && !s.startsWith('while True'))
+    const codes = await generated(t, snippets)
+    snippets.forEach((snippet, i) => {
+      const needed = snippet.includes('time.') ? 'import time' : snippet.includes('machine.') ? 'import machine' : null
+      if (needed) expect(codes[i].split('\n'), snippet).toContain(needed)
+      expect(codes[i], snippet).not.toContain('from ')
+    })
+    // the Calliope names are plain calls here, with no import
+    const [plain] = await generated(t, ['sleep(1000)\ndisplay.show(Image.HEART)'])
+    expect(plain).not.toContain('import')
+  })
+
+  test('an unknown board is reported, and the Calliope toolbox shown', async () => {
+    await addModule(teacher!, { board: 'arduino' })
+    const t = await ready(teacher!)
+    await expect(t.locator('#errors')).toContainText('Unknown board "arduino"')
+    await expect(status(t)).toHaveText('Error')
+    await expect.poll(() => categories(t)).toContain('RGB LEDs')
   })
 
   test('the run button sends text typed just before the click', async () => {
